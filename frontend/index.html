@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>UWO 跑商调试台</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="app">
+
+  <!-- ==================== ① 左侧一级导航：按一天的操作顺序排 ==================== -->
+  <nav class="nav">
+    <div class="nav-brand">UWO 调试台<span class="muted">图像识别 + 状态机</span></div>
+    <button class="nav-item active" data-page="run" onclick="switchPage('run')">
+      <span class="nav-ico">▶</span><span class="nav-txt">运行</span>
+      <span class="nav-dot" id="nav-dot-run" hidden></span>
+    </button>
+    <button class="nav-item" data-page="material" onclick="switchPage('material')">
+      <span class="nav-ico">▣</span><span class="nav-txt">素材</span>
+    </button>
+    <button class="nav-item" data-page="debug" onclick="switchPage('debug')">
+      <span class="nav-ico">◎</span><span class="nav-txt">调试</span>
+    </button>
+    <button class="nav-item" data-page="flow" onclick="switchPage('flow')">
+      <span class="nav-ico">⛓</span><span class="nav-txt">流程</span>
+    </button>
+    <button class="nav-item" data-page="plan" onclick="switchPage('plan')">
+      <span class="nav-ico">≡</span><span class="nav-txt">表格</span>
+    </button>
+    <button class="nav-item" data-page="route" onclick="switchPage('route')">
+      <span class="nav-ico">⚑</span><span class="nav-txt">跑商设置</span>
+    </button>
+    <button class="nav-item" data-page="settings" onclick="switchPage('settings')">
+      <span class="nav-ico">⚙</span><span class="nav-txt">设置</span>
+    </button>
+    <div class="nav-legend">
+      <b>运行</b>选港口·启动·看日志<br>
+      <b>素材</b>模板库 + OCR 区域<br>
+      <b>调试</b>试一次识别<br>
+      <b>流程</b>状态机编辑器<br>
+      <b>表格</b>跑商购物清单<br>
+      <b>跑商设置</b>买货/中转/出货<br>
+      <b>设置</b>引擎参数 + 设备
+    </div>
+  </nav>
+
+  <!-- ==================== ② 右侧舞台（滚动容器仍叫 .main，缩放定位靠它） ==================== -->
+  <div class="stage main">
+
+    <!-- 截图画面：常驻 + 可折叠。框选建模板、框选测 OCR 都在这里 -->
+    <section class="screen-box" id="screen-box" data-open="1">
+      <div class="screen-head">
+        <button class="btn small" id="btn-screen-toggle" onclick="toggleScreen()">收起画面</button>
+        <button id="btn-refresh" class="btn primary small">刷新截图</button>
+        <span id="coord" class="info">移动鼠标看坐标</span>
+        <span id="refresh-status" class="info"></span>
+        <span id="sel-info" class="info">未选择区域</span>
+        <button id="btn-copy-sel" class="btn small" onclick="copySelection()">复制选区</button>
+        <button id="btn-new-template" class="btn small" hidden onclick="openNewTemplate()">新建模板</button>
+        <div class="zoom-group">
+          <span id="zoom-level" class="info">缩放: 100%</span>
+          <button class="btn small" onclick="setZoom(0.5)">50%</button>
+          <button class="btn small" onclick="setZoom(0.75)">75%</button>
+          <button class="btn small" onclick="setZoom(1)">100%</button>
+          <button class="btn small" onclick="setZoom(1.5)">150%</button>
+          <button class="btn small" onclick="setZoom(2)">200%</button>
+          <button class="btn small" onclick="setZoom(3)">300%</button>
+        </div>
+      </div>
+      <div class="canvas-wrap" id="canvas-wrap">
+        <img id="screen-img" alt="模拟器截图" draggable="false" />
+        <canvas id="overlay-canvas"></canvas>
+        <span id="region-label"></span>
+      </div>
+    </section>
+
+    <!-- 新建模板对话框：默认隐藏由 CSS .modal {display:none} 保证，加 .show 才显示 -->
+    <div id="new-template-modal" class="modal">
+      <div class="modal-box">
+        <h3>新建模板</h3>
+        <label>名称：<input id="nt-name" type="text" placeholder="如：商品-羊毛"></label>
+        <label>阈值：<input id="nt-threshold" type="number" step="0.05" min="0" max="1" value="0.8"></label>
+        <label>ROI (x,y,w,h)：<input id="nt-roi" type="text" placeholder="100,200,80,80"></label>
+        <label>分类：<input id="nt-category" type="text" list="tpl-cat-options"
+                             placeholder="留空=按名字前缀自动归类，可写 一级/二级"></label>
+        <label>模板图来源：</label>
+        <div>
+          <label><input type="radio" name="nt-mode" value="crop" checked> 从截图裁剪</label>
+          <label><input type="radio" name="nt-mode" value="upload"> 使用上传图</label>
+        </div>
+        <div class="nt-preview">
+          <canvas id="nt-preview-canvas" width="120" height="120"></canvas>
+          <div id="nt-upload-name" class="muted"></div>
+        </div>
+        <div class="modal-actions">
+          <button class="btn" onclick="closeModal()">取消</button>
+          <button class="btn primary" onclick="saveNewTemplate()">保存</button>
+        </div>
+      </div>
+    </div>
+
+    <main class="pages">
+
+      <!-- ---------- 栏 1：运行（队列编排 + 启动；关掉浏览器队列也在后端继续跑） ---------- -->
+      <section class="page" id="page-run">
+        <section class="route-card">
+          <h3><span class="route-step">★</span>运行队列 · 挑几个方案按顺序跑
+            <span class="tag tag-global">存 run_queue.json · 跑在后端线程，关掉浏览器也继续</span></h3>
+          <div class="field-row">
+            <div class="field">
+              <label>加一个方案（选项来自「跑商设置」存的方案库）
+                <select id="queue-preset-select"></select>
+              </label>
+            </div>
+            <button class="btn small primary" onclick="queueAdd()">+ 加入队列</button>
+            <button class="btn small" onclick="queueRefresh()">刷新方案库</button>
+            <button class="btn small" onclick="switchPage('route')">去跑商设置编方案</button>
+          </div>
+          <div id="queue-list" class="stops-order">（队列是空的）</div>
+          <div class="field-row">
+            <label>循环模式
+              <select id="queue-mode" onchange="onQueueModePick(this.value)">
+                <option value="once">跑一遍就结束</option>
+                <option value="repeat">重复 N 遍</option>
+                <option value="infinite">无限循环（手动停）</option>
+              </select>
+            </label>
+            <label>重复遍数 <input id="queue-repeat" type="number" min="1" value="1"></label>
+            <button class="btn small" onclick="saveQueue()">保存队列</button>
+            <button id="btn-state-start" class="btn primary" onclick="startQueue()">启动队列</button>
+            <button id="btn-state-stop" class="btn" disabled onclick="stopQueue()">停止队列</button>
+          </div>
+          <div id="queue-run-info" class="run-info">队列未运行</div>
+        </section>
+
+        <div id="state-run-info" class="run-info">引擎未运行</div>
+        <div id="state-restock-info" class="restock-info" hidden></div>
+        <div class="log-title">
+          实时日志（最近 20 条）
+          <span id="state-poll-status" class="info"></span>
+        </div>
+        <pre id="state-logs" class="result-box log-box">暂无日志</pre>
+        <p class="hint">
+          这一栏管<b>跑哪几个方案、按什么顺序、跑几遍</b>：从方案库里挑 1~n 个排成队列，
+          点「启动队列」交给后端线程按顺序跑 —— <b>队列和浏览器没关系</b>，关掉这个页面它照样跑；
+          想看进度回来点一下「启动队列」旁边的状态就行。<br>
+          队列里每个方案都是<b>完整的一趟</b>（买货 → 可选中转 → 出货），一趟跑完
+          （引擎报 <code>stop_kind=done</code>）才接下一个；哪一趟没正常走完就整队停下并告诉你原因。<br>
+          <b>「当前所在港」不用填</b>：每趟启动前队列自己截一张图、OCR 读那块港口名。
+          读到的港是这一趟的进货港 → 就从那一站走起；<b>不是</b> → 弹窗问一句：
+          点「确定」先从现在的港开去第一个进货港再整趟跑，点「取消」停队列；<b>读不出港名</b> → 直接停队列报错。<br>
+          买货、出港、卖货都花真金币、不可逆 —— 请人在屏幕前再点启动。
+        </p>
+      </section>
+
+      <!-- ---------- 栏 2：素材（模板库 + OCR 区域库，双列） ---------- -->
+      <section class="page" id="page-material" hidden>
+        <div class="material-cols">
+          <div class="material-col">
+            <h3>模板库</h3>
+            <button id="btn-upload" class="btn block">上传模板图片</button>
+            <input type="file" id="file-upload" accept="image/*" hidden>
+            <div class="tpl-toolbar">
+              <input id="tpl-filter" type="text" placeholder="筛选：模板名 / 分类" oninput="filterTemplates(this.value)">
+              <button id="btn-tpl-collapse" class="btn small" onclick="toggleAllCats()">折叠全部</button>
+            </div>
+            <datalist id="tpl-cat-options"></datalist>
+            <div id="template-list" class="template-list"></div>
+          </div>
+          <div class="material-col">
+            <h3>OCR 区域库</h3>
+            <p class="hint">在「调试 → OCR 测试」里框好区域、填名字，回来这里就能看到；点「加载」把 ROI 填回去。</p>
+            <div id="ocr-region-list" class="template-list"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ---------- 栏 3：调试（二级 tab：模板测试 / OCR 测试，共用上面的框选） ---------- -->
+      <section class="page" id="page-debug" hidden>
+        <div class="tabbar">
+          <button class="tab active" data-dtab="template" onclick="switchDebugTab('template')">模板测试</button>
+          <button class="tab" data-dtab="ocr" onclick="switchDebugTab('ocr')">OCR 测试</button>
+          <button class="tab" data-dtab="step" onclick="switchDebugTab('step')">单步调试</button>
+        </div>
+
+        <section class="test-area panel" id="panel-template">
+          <h3>测试函数</h3>
+          <div class="test-row">
+            <label>模板：<select id="test-any-select" multiple></select></label>
+            <label>ROI：<input id="test-any-roi" type="text" placeholder="留空=全图"></label>
+            <button class="btn" onclick="runFindAny()">find_any_template</button>
+          </div>
+          <div class="test-row">
+            <label>列表模板：<select id="test-list-select"></select></label>
+            <label>列表ROI：<input id="test-list-roi" type="text" placeholder="x,y,w,h"></label>
+            <label>向下看手势：<input id="test-list-swipe" type="text" placeholder="x1,y1,x2,y2（留空自动）"></label>
+            <label>向下次数：<input id="test-list-swipes" type="number" value="5" min="0"></label>
+            <label>向上次数：<input id="test-list-swipes-up" type="number" value="0" min="0"></label>
+            <button class="btn" onclick="runFindList()">find_in_list</button>
+          </div>
+          <p class="hint">方向以「看到列表哪一段」为准：向下=手指上拖看后面的货，向上=手指下拖回到前面的货。先向下找满，再向上找。</p>
+          <pre id="test-result" class="result-box">测试结果将显示在这里</pre>
+        </section>
+
+        <section class="test-area panel" id="panel-ocr" hidden>
+          <h3>OCR 测试</h3>
+          <div class="test-row">
+            <label class="ocr-param">放大倍数
+              <input type="range" id="ocr-scale" min="1" max="5" step="1" value="2">
+              <span id="ocr-scale-val" class="info">2x</span>
+            </label>
+            <label>二值化
+              <select id="ocr-binary">
+                <option value="none">None（默认，推荐）</option>
+                <option value="adaptive">adaptive</option>
+                <option value="otsu">otsu</option>
+              </select>
+            </label>
+          </div>
+          <div class="test-row">
+            <label>关键词（可选）：<input id="ocr-keyword" type="text" placeholder="如：希洪" style="width:140px"></label>
+            <button class="btn primary" id="btn-ocr-text" onclick="runOcr(false)">识别文字</button>
+            <button class="btn" id="btn-ocr-find" onclick="runOcr(true)">查找关键词</button>
+            <span class="muted">先用鼠标在截图上框选区域，不选则识别全屏</span>
+          </div>
+          <pre id="ocr-result" class="result-box">识别结果将显示在这里（首次调用需加载模型，约 20~30 秒）</pre>
+
+          <h3>保存为命名区域</h3>
+          <div class="test-row">
+            <label>名称：<input id="ocr-region-name" type="text" placeholder="如：港口名字" style="width:140px"></label>
+            <label>场景：<input id="ocr-region-scene" type="text" placeholder="如：港口界面" style="width:140px"></label>
+            <button class="btn" id="btn-ocr-save-region" onclick="saveOcrRegion()">保存为命名区域</button>
+            <button class="btn small" id="btn-ocr-edit-cancel" hidden onclick="cancelEditOcrRegion()">取消编辑</button>
+          </div>
+          <div class="muted">保存内容 = 当前框选的 ROI + 上面的放大倍数 / 二值化参数</div>
+        </section>
+
+        <!-- 单步调试：选一个模块 + 一个港口直接跑一次（不写 route_plan.json，不参与队列） -->
+        <section class="test-area panel" id="panel-step" hidden>
+          <h3>单步调试 · 选一个模块直接跑一次</h3>
+          <div class="test-row">
+            <label>模块
+              <select id="step-module" onchange="renderStepGoods()"></select>
+            </label>
+            <label>本次港口
+              <input id="step-port" type="text" list="step-port-options"
+                     placeholder="要买 / 要开去 / 要卖的港口" oninput="renderStepGoods()">
+            </label>
+            <label>当前所在港（留空 = 点运行时 OCR 读一次）
+              <input id="step-current" type="text" list="step-port-options" placeholder="留空就读画面">
+            </label>
+          </div>
+          <div id="step-goods" class="route-goods" hidden></div>
+          <div class="test-row">
+            <button id="step-run" class="btn primary" onclick="runDebugStep()">运行一次</button>
+            <button id="step-stop" class="btn" disabled onclick="stopDebugStep()">停止</button>
+            <span id="step-status" class="info"></span>
+          </div>
+          <pre id="step-result" class="result-box">运行结果会显示在这里</pre>
+          <p class="hint">
+            这是<b>一次试跑</b>：选「买货 / 港口移动 / 卖货」里的一个模块 + 一个港口，直接起引擎跑这一条链，
+            用来调某一站的状态链，<b>不写 <code>route_plan.json</code>、不参与方案库和队列</b>。<br>
+            <b>整趟（trip）这里跑不了</b>：它要一份完整站次表，是「跑商设置 + 运行栏」那条正路。<br>
+            买货模块要勾货（勾选顺序 = 买货顺序）；不勾后端会直接拒绝 —— 买货花真金币、不可逆。<br>
+            队列或引擎正在跑的时候起不了单步，先停掉。
+          </p>
+          <datalist id="step-port-options"></datalist>
+        </section>
+      </section>
+
+      <!-- ---------- 栏 4：流程（状态机编辑器；启动/日志在「运行」栏） ---------- -->
+      <section class="page" id="page-flow" hidden>
+        <div class="state-topbar">
+          <button class="btn primary" onclick="saveStates()">保存到 states.json</button>
+          <span id="state-save-status" class="info"></span>
+          <span class="muted">改完记得先「保存」，再去「运行」栏启动</span>
+        </div>
+        <div class="state-layout">
+          <div class="state-list-col">
+            <button class="btn block" onclick="newState()">+ 新建状态</button>
+            <div id="state-list" class="state-list"></div>
+          </div>
+          <div class="state-editor-col">
+            <div id="state-editor" class="state-editor"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ---------- 栏 5：表格（跑商购物清单） ---------- -->
+      <section class="page" id="page-plan" hidden>
+        <div class="state-topbar">
+          <button class="btn primary" onclick="savePlan()">保存到 purchase_plan.json</button>
+          <button class="btn" onclick="newPlanRow()">+ 新增一个港口</button>
+          <span id="plan-save-status" class="info"></span>
+        </div>
+        <p class="hint plan-short">
+          这一栏是<b>纯目录</b>：只回答「哪个港口买得到哪些货」，<b>不管这一趟怎么走、买哪几件</b>（那在「跑商设置」栏）。<br>
+          一级<b>只有港口名</b>（可搜索、按拼音排）：<b>点一个港口进它的货物清单</b>，再点一件货才进详细编辑；
+          <b>「货物名称」要打字从下拉里点</b>，不能手打。展开下面的「说明」看全部规则。
+        </p>
+        <details class="plan-help">
+          <summary>说明（全部规则）</summary>
+          <p class="hint">
+            这一栏只是一份<b>纯目录</b>：回答<b>「哪个港口买得到哪些货」</b>，不决定这一趟怎么走，也不决定买哪几件；<br>
+            <b>「这一趟去哪个港、每一站买哪几件」都在「跑商设置」栏里定</b>（第 1 段买货站下面有勾选框，
+            勾的就是这一站要买的，编号 = 先买哪个）。这里多填的行不会自动被买。<br>
+            <b>三级界面</b>：一级只列<b>港口名</b>（上面有搜索框，按拼音排），点一个港口进二级看<b>这个港有哪些货</b>，
+            再点一件货进三级编辑它的具体内容（货物 / 类别 / 备注），改完点「‹ 返回货物清单」或「‹ 返回港口列表」往回走
+            （改动仍然只在内存里，<b>要点上面的「保存」才写进文件</b>）。<br>
+            一个港口一组：<b>港口名称在二级改一次，这一组的每一行都跟着改</b>；
+            点二级里的「+ 加一种货」会自动沿用这个港口，不用再打一遍。<br>
+            「货物名称」<b>打几个字就能搜</b>：在输入框里打「版」，下面下拉会把模板库里所有名字带「版」的
+            <b>商品-XX</b> 都列出来，<b>点一下才算选中</b> —— 打字本身不会写进表格，
+            也不能手打一个模板库里没有的名字（名字差一个字买货时就找不到货）。<br>
+            每行只选「类别」，右边的「船舱名」自动按 大型XX管理室 生成，改类别它就跟着变。<br>
+            同一个港口想买几种货就加几行，但「港口名称 + 货物名称」不能重复。<br>
+            引擎买货时按<b>「跑商设置」里勾的顺序</b>一件一件买，最后一件买完自己停；<b>类别 / 船舱名仍然从这一栏取</b>
+            （勾的只是货名），所以这里的行不能随便删 —— 删了正在跑商设置里挂着的货会变成「已失效」，点启动会被拒绝。
+          </p>
+        </details>
+        <div id="plan-list" class="plan-list"></div>
+      </section>
+
+      <!-- ---------- 栏 6：跑商设置（只编方案；真正跑哪几个方案在「运行」栏排队） ---------- -->
+      <section class="page" id="page-route" hidden>
+        <div class="state-topbar">
+          <button class="btn primary" onclick="saveRoute()">保存方案到 route_presets.json</button>
+          <button class="btn" onclick="presetSaveAsNew()">另存为新方案</button>
+          <span id="route-status" class="info"></span>
+        </div>
+        <p class="hint">
+          这一栏<b>只编方案</b>。方案一律是<b>一整套完整流程</b>：买货（可以多个）→ 中转（可以多个）→ 最后<b>一个</b>出货港，
+          不再分「本次跑哪个模块」那种单模块方案。<br>
+          真正跑哪几个方案、按什么顺序、跑几遍 —— 去<b>「运行」栏</b>排队列：那里挑 1~n 个方案排好，点启动交给后端线程跑。<br>
+          <b>「当前所在港」不用填</b>：队列每趟启动前自己截图 OCR 读一次，读到哪个港就从那一站起步
+          （不在进货港里会弹窗问你）。所以方案里也<b>不存</b>这个港 —— 存进去半年后就会骗人。<br>
+          <b>买货那一站下面有勾选框</b>，勾上的就是这一站要买的货，编号 = 先买哪个。
+          站次顺序保存时按 <b>买货 → 中转 → 出货</b> 自动重排，同类内部保持你排的先后，挪了哪几站会告诉你。
+        </p>
+
+        <section class="route-card">
+          <h3><span class="route-step">★</span>跑商方案库 · 存整套 / 读回来
+            <span class="tag tag-global">存 route_presets.json，引擎不读它</span></h3>
+          <div class="field-row">
+            <div class="field">
+              <label>方案名（同名就是<b>覆盖</b>，会先问你一句）
+                <input id="preset-name" type="text" placeholder="如：北京买油画 → 热那亚卖">
+              </label>
+            </div>
+            <button class="btn small primary" onclick="saveRoute()">把现在这套存成方案</button>
+            <button class="btn small" onclick="loadPresetEditor()">刷新方案列表</button>
+          </div>
+          <div id="preset-list" class="preset-list">（还没读取）</div>
+          <p class="hint">
+            方案存的是<b>「这整套流程怎么走」</b>：站次顺序 + 每一站勾的货 + 备注，<b>不含「当前所在港」</b>。<br>
+            存进去的是<b>你界面上现在这套</b>（含还没保存的改动），存的时候按后端的同一套规矩验一遍
+            （非买货段不许挂货、出货段只能一站），<b>验不过就存不进去</b>。<br>
+            列表里每行的「编辑」把这一份装回下面的编辑区；「删除」只删方案库这一条，不影响正在跑的那一趟。
+            队列正在跑的时候存 / 删方案会被拒绝 —— 队列每趟开始前都会重读方案库。
+          </p>
+        </section>
+
+        <!-- 整趟顺序一览（顺序 = 数组顺序，下面卡片里改） -->
+        <section class="route-card">
+          <h3><span class="route-step">↦</span>这一趟的站次
+            <span class="tag tag-global">从上到下就是要走的顺序</span></h3>
+          <div id="route-stops-order" class="stops-order"></div>
+        </section>
+
+        <div class="route-cols">
+          <!-- ① 买货站（可多个）：每站勾自己要买的货 -->
+          <section class="route-card">
+            <h3><span class="route-step">1</span>买货港口 + 这一站买什么 · 可以多个
+              <span class="tag tag-entry">勾哪几件就买哪几件</span></h3>
+            <div id="route-stops-buy" class="stops"></div>
+            <div class="field-row">
+              <button class="btn small" onclick="stopAdd('buy')">+ 加一个买货港</button>
+              <button class="btn small" onclick="switchPage('plan')">去「表格」栏加货 / 改货</button>
+            </div>
+            <div id="route-buy-goods" class="route-goods">（还没读取）</div>
+            <p class="hint">
+              港口只能从「表格」栏填过的港口里挑（手打的港在表格里没有行，跑起来会被拒绝）；
+              填好港口后，这一站下面会列出<b>该港在目录里买得到的货</b>，勾哪几件就买哪几件，
+              <b>编号就是先买的顺序</b>（↑↓ 换先后）。<br>
+              为什么货名只给勾、不给打字：引擎要拿名字回「表格」栏那一行取<b>类别</b>（决定点哪个货物分类），
+              目录里没有这个名字就买不成 —— 所以这里根本不放手打的入口。<br>
+              「表格」栏那一头只回答「这个港有没有这种货」，<b>不回答「这一趟买不买它」</b>；
+              改了表格不会影响你已经勾好的站，但表格删掉某一行后，勾着它的那一站会变黄字「已失效」。
+            </p>
+          </section>
+
+          <!-- ② 中转站（可多个）：整趟会途经 -->
+          <section class="route-card">
+            <h3><span class="route-step">2</span>中转港口 · 可以多个
+              <span class="tag tag-global">整趟会走这一站</span></h3>
+            <div id="route-stops-transit" class="stops"></div>
+            <button class="btn small" onclick="stopAdd('transit')">+ 加一个中转港</button>
+            <p class="hint">中转不是「跑一条链」，是<b>途经这个港</b>：引擎开到那儿、进一次港再出一次港
+              （补一次水粮），<b>不进交易所、不买也不卖</b>，所以这一站<b>不给挂货物清单</b>。<br>
+              要路过一个港就排成中转，<b>不要排成第二个出货港</b>（出货段整段只认一站）。</p>
+          </section>
+
+          <!-- ③ 出货站（只能一个）：整趟的最后一站 -->
+          <section class="route-card">
+            <h3><span class="route-step">3</span>出货港口 · <b>只能一个</b>
+              <span class="tag tag-global">整趟的最后一站</span></h3>
+            <div id="route-stops-sell" class="stops"></div>
+            <button class="btn small" id="btn-add-sell" onclick="stopAdd('sell')">+ 加一个出货港</button>
+            <p class="hint">整趟走到最后一站就是这里：链头要同时满足<b>当前所在港 = 这一站的出货港</b>
+              + <b>账上记着有货要卖</b>（买货那一站买完才会置 1，卖完自动置 0）。<br>
+              这一段<b>不挂货物清单</b>：卖货是「货舱里有什么卖什么」，点全部添加就全卖。<br>
+              <b>为什么只给一个</b>（2026-09-29 你指出「出货港口实际不可以多个」）：卖货那一段只认
+              「当前所在港 + 类型是出货」的<b>那一站</b>，多排的出货站引擎永远不会走 ——
+              存着一份永远不会读的站，比报错更容易骗人。确实要路过别的港就当<b>中转</b>排。</p>
+          </section>
+        </div>
+
+        <datalist id="route-port-options"></datalist>
+      </section>
+
+      <!-- ---------- 栏 7：设置（引擎参数 + 设备与环境） ---------- -->
+      <section class="page" id="page-settings" hidden>
+        <div class="state-topbar">
+          <button class="btn primary" onclick="saveConfig()">保存引擎参数</button>
+          <button class="btn" onclick="loadSettings()">放弃改动，重新读取</button>
+          <span id="cfg-save-status" class="info"></span>
+        </div>
+        <p class="hint">
+          这里改的是 <b>states.json 的 config 段</b>，流程（states 数组）一个字都不动。<br>
+          <b>改完要下一次点「启动状态机」才生效</b> —— 引擎只在启动那一刻读一次 states.json，跑一半改参数不影响正在跑的这一趟。<br>
+          状态机正在跑的时候这里保存会被拒绝，免得你以为改了其实没改。
+        </p>
+        <div id="cfg-form" class="cfg-form"></div>
+
+        <h3 class="cfg-h3">设备与环境</h3>
+        <div id="device-info" class="result-box dev-box">打开这一栏时自动读取（要跑一次 adb devices，约 0.3 秒）</div>
+      </section>
+
+    </main>
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

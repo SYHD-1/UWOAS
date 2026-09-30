@@ -1,0 +1,114 @@
+[
+  {
+    "name": "港口名字",
+    "scene": "港口界面",
+    "roi": [
+      188,
+      23,
+      182,
+      54
+    ],
+    "preprocess": {
+      "scale": 2,
+      "binary_method": "otsu"
+    }
+  },
+  {
+    "name": "协商按钮区",
+    "scene": "交易-触发协商",
+    "roi": [
+      1076,
+      550,
+      422,
+      240
+    ],
+    "preprocess": {
+      "scale": 2,
+      "binary_method": null
+    }
+  },
+  {
+    "name": "购买出售标签",
+    "scene": "交易所",
+    "roi": [
+      12,
+      90,
+      160,
+      214
+    ],
+    "preprocess": {
+      "scale": 2,
+      "binary_method": null
+    }
+  },
+  {
+    "name": "右侧面板标题",
+    "scene": "交易所",
+    "roi": [
+      1225,
+      84,
+      179,
+      71
+    ],
+    "preprocess": {
+      "scale": 2,
+      "binary_method": null
+    }
+  },
+  {
+    "name": "商品列表",
+    "scene": "交易所",
+    "roi": [
+      437,
+      170,
+      625,
+      599
+    ],
+    "preprocess": {
+      "scale": 1,
+      "binary_method": null
+    }
+  },
+  {
+    "name": "补货倒计时",
+    "scene": "交易所-购买页",
+    "roi": [
+      690,
+      120,
+      107,
+      34
+    ],
+    "preprocess": {
+      "scale": 2,
+      "binary_method": null
+    }
+  },
+  {
+    "name": "地图搜索框",
+    "scene": "世界地图",
+    "roi": [
+      90,
+      105,
+      345,
+      45
+    ],
+    "preprocess": {
+      "scale": 2,
+      "binary_method": "otsu"
+    }
+  },
+  {
+    "name": "地图选中城市",
+    "scene": "世界地图-城市信息",
+    "roi": [
+      1187,
+      163,
+      255,
+      44
+    ],
+    "preprocess": {
+      "scale": 2,
+      "binary_method": "otsu"
+    }
+  }
+]

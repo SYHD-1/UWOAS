@@ -1,0 +1,626 @@
+{
+  "config": {
+    "interval_ms": 3000,
+    "max_rounds": 60,
+    "max_no_match": 20,
+    "action_timeout_seconds": 120,
+    "negotiation": {
+      "region": "协商按钮区",
+      "max_clicks": 1,
+      "click_interval_ms": 1500,
+      "buttons": {
+        "no": [
+          1276,
+          585
+        ],
+        "once": [
+          1283,
+          669
+        ],
+        "all": [
+          1283,
+          754
+        ]
+      }
+    },
+    "exit_to_port": {
+      "enabled": true,
+      "buttons": [
+        "图标-房子-退出",
+        "图标-关闭-X"
+      ],
+      "max_clicks": 5,
+      "wait_ms": 1200,
+      "port_marker": "UI-港口标志"
+    },
+    "human_click": {
+      "enabled": true,
+      "delay_min_ms": 120,
+      "delay_max_ms": 450,
+      "inset_ratio": 0.18
+    },
+    "trip": {
+      "modules": [
+        "buy",
+        "sail",
+        "sell"
+      ],
+      "max_rounds": 400
+    }
+  },
+  "states": [
+    {
+      "id": "in_port",
+      "name": "在港口界面核对港口名后按3进交易所",
+      "module": "buy",
+      "entry": true,
+      "trip_entry": "buy",
+      "condition": {
+        "type": "all",
+        "conditions": [
+          {
+            "type": "template",
+            "name": "UI-港口标志",
+            "threshold": 0.8
+          },
+          {
+            "type": "plan_port",
+            "region": "港口名字"
+          }
+        ]
+      },
+      "actions": [
+        {
+          "type": "key",
+          "digit": 3
+        }
+      ],
+      "next": "enter_exchange"
+    },
+    {
+      "id": "enter_exchange",
+      "name": "进交易所点购买标签",
+      "module": "buy",
+      "entry": true,
+      "condition": {
+        "type": "template",
+        "name": "UI-交易所标志",
+        "threshold": 0.8
+      },
+      "actions": [
+        {
+          "type": "click_ocr",
+          "region": "购买出售标签",
+          "keyword": "购买"
+        },
+        {
+          "type": "wait",
+          "ms": 800
+        }
+      ],
+      "next": "check_restock"
+    },
+    {
+      "id": "check_restock",
+      "name": "买货前先查这个港的补货时刻：没记过或时刻已过就直接买，还没到点才本地等到点、到点后重进「购买」标签；买前读一次倒计时把下次时刻记进账本",
+      "module": "buy",
+      "entry": true,
+      "condition": {
+        "type": "template",
+        "name": "UI-购买页-标题",
+        "threshold": 0.9
+      },
+      "actions": [
+        {
+          "type": "wait_restock",
+          "region": "补货倒计时",
+          "poll_interval_ms": 15000,
+          "max_wait_seconds": 2400,
+          "unknown_seconds": 120,
+          "timeout_seconds": 2520
+        }
+      ],
+      "next": "buy_at_exchange"
+    },
+    {
+      "id": "buy_at_exchange",
+      "name": "在购买页买货",
+      "module": "buy",
+      "entry": true,
+      "condition": {
+        "type": "ocr",
+        "region": "右侧面板标题",
+        "contains": "购买"
+      },
+      "actions": [
+        {
+          "type": "click_template_optional",
+          "name": "图标-超载出售-红点",
+          "threshold": 0.8,
+          "timeout_ms": 1500,
+          "poll_interval_ms": 300,
+          "max_clicks": 1,
+          "wait_before_ms": 0,
+          "wait_ms": 800
+        },
+        {
+          "type": "wait",
+          "ms": 800
+        },
+        {
+          "type": "buy_commodities",
+          "templates_from_plan": true,
+          "list_roi": [
+            307,
+            167,
+            760,
+            604
+          ],
+          "swipe_range": [
+            687,
+            700,
+            687,
+            250
+          ],
+          "max_swipes": 3,
+          "max_swipes_up": 3,
+          "swipe_pause_ms": 800,
+          "reset_to_top": true,
+          "click_wait_ms": 800,
+          "negotiation": false,
+          "threshold": 0.8
+        },
+        {
+          "type": "click_template",
+          "name": "UI-购买",
+          "threshold": 0.85
+        },
+        {
+          "type": "wait",
+          "ms": 1000
+        },
+        {
+          "type": "click_template_optional",
+          "name": "UI-确定",
+          "threshold": 0.85,
+          "timeout_ms": 3000,
+          "poll_interval_ms": 300,
+          "wait_ms": 1000
+        },
+        {
+          "type": "if",
+          "condition": {
+            "type": "any",
+            "conditions": [
+              {
+                "type": "ocr",
+                "region": "协商按钮区",
+                "contains": "进行1次"
+              },
+              {
+                "type": "ocr",
+                "region": "协商按钮区",
+                "contains": "进行所有剩余机会"
+              }
+            ]
+          },
+          "condition_timeout_ms": 6000,
+          "then": [
+            {
+              "type": "negotiation"
+            },
+            {
+              "type": "wait",
+              "ms": 800
+            },
+            {
+              "type": "click_template_optional",
+              "name": "UI-确定",
+              "threshold": 0.85,
+              "timeout_ms": 3000,
+              "wait_ms": 800,
+              "max_clicks": 2
+            }
+          ],
+          "else": [
+            {
+              "type": "click_template_optional",
+              "name": "UI-确定",
+              "threshold": 0.85,
+              "timeout_ms": 3000,
+              "wait_ms": 800,
+              "max_clicks": 2
+            }
+          ]
+        },
+        {
+          "type": "click_after_template",
+          "anchor": "UI-结算结果-标题",
+          "offset": [
+            0,
+            318
+          ],
+          "threshold": 0.9,
+          "wait_before_ms": 500
+        },
+        {
+          "type": "set_flag",
+          "name": "sell_pending",
+          "value": true
+        },
+        {
+          "type": "plan_advance"
+        },
+        {
+          "type": "if",
+          "condition": {
+            "type": "plan_pending"
+          },
+          "then": [],
+          "else": [
+            {
+              "type": "trip_next",
+              "after": "work",
+              "reason": "本港口的货物行已跑完一遍，结束买货",
+              "done_reason": "这一趟的站次已经全部走完（最后这一站的货也买完了）"
+            }
+          ]
+        }
+      ],
+      "next": "buy_at_exchange"
+    },
+    {
+      "id": "sail_from_port",
+      "name": "移动模块起点：人在港口码头上，按数字1走到出港所（导航键，实测 3~12 秒到）",
+      "module": "sail",
+      "entry": true,
+      "trip_entry": "transit",
+      "condition": {
+        "type": "template",
+        "name": "UI-港口标志",
+        "threshold": 0.8
+      },
+      "actions": [
+        {
+          "type": "key",
+          "digit": 1
+        }
+      ],
+      "next": "sail_office"
+    },
+    {
+      "id": "sail_office",
+      "name": "在出港所页面点「补给后出航」（花真金币，数额每次会变，不写死价格）",
+      "module": "sail",
+      "entry": true,
+      "condition": {
+        "type": "template",
+        "name": "UI-出港所-标题",
+        "threshold": 0.85
+      },
+      "actions": [
+        {
+          "type": "click_template",
+          "name": "UI-补给后出航"
+        },
+        {
+          "type": "wait",
+          "ms": 1500
+        }
+      ],
+      "next": "sail_open_map"
+    },
+    {
+      "id": "sail_open_map",
+      "name": "在海上点小地图开世界地图",
+      "module": "sail",
+      "entry": false,
+      "condition": {
+        "type": "template",
+        "name": "UI-海上",
+        "threshold": 0.8
+      },
+      "actions": [
+        {
+          "type": "click",
+          "x": 1408,
+          "y": 252
+        },
+        {
+          "type": "wait",
+          "ms": 1500
+        }
+      ],
+      "next": "sail_pick_city"
+    },
+    {
+      "id": "sail_pick_city",
+      "name": "世界地图里搜本次港口：先确认字真进了搜索框，再点列表第一行，核对选中的城市后才点「城市移动」",
+      "module": "sail",
+      "entry": false,
+      "condition": {
+        "type": "template",
+        "name": "UI-地图-城市列表",
+        "threshold": 0.8
+      },
+      "actions": [
+        {
+          "type": "click_template",
+          "name": "UI-地图-城市列表"
+        },
+        {
+          "type": "wait",
+          "ms": 1000
+        },
+        {
+          "type": "ensure_input",
+          "click": [
+            125,
+            124
+          ],
+          "click_rect": [
+            90,
+            105,
+            345,
+            45
+          ],
+          "text_from": "run_port",
+          "region": "地图搜索框",
+          "settle_ms": 900,
+          "read_ms": 800,
+          "max_attempts": 5,
+          "timeout_seconds": 180
+        },
+        {
+          "type": "click",
+          "x": 265,
+          "y": 173
+        },
+        {
+          "type": "wait",
+          "ms": 1500
+        },
+        {
+          "type": "confirm_city_move",
+          "name": "UI-城市移动",
+          "region": "地图选中城市",
+          "timeout_ms": 6000,
+          "poll_interval_ms": 800,
+          "timeout_seconds": 60
+        }
+      ],
+      "next": "voyage"
+    },
+    {
+      "id": "voyage",
+      "name": "自动航行中：盯中断；认出灯塔 = 已到港，本模块到此完成并停止",
+      "module": "sail",
+      "entry": true,
+      "condition": {
+        "type": "template",
+        "name": "UI-海上",
+        "threshold": 0.8
+      },
+      "actions": [
+        {
+          "type": "wait_arrival",
+          "name": "UI-港口标志",
+          "threshold": 0.8,
+          "poll_interval_ms": 5000,
+          "max_wait_seconds": 2400,
+          "timeout_seconds": 2520,
+          "timeout_reason": "在海上等了 40 分钟没到港（左上角一直是帆船，没换成灯塔）",
+          "interrupt": {
+            "type": "retry_watch",
+            "name": "UI-海上-重启自动移动",
+            "click": [
+              802,
+              811
+            ],
+            "click_rect": [
+              692,
+              782,
+              220,
+              57
+            ],
+            "interval_ms": 5000,
+            "max_attempts": 5,
+            "fail_reason": "自动航行中断，连续点 5 次「重启自动移动」仍没恢复"
+          }
+        },
+        {
+          "type": "trip_next",
+          "after": "arrive",
+          "reason": "已到目的港，「港口间移动」模块完成（要不要接着买货，由人再启动买货模块）",
+          "done_reason": "这一趟的站次已经全部走完（船已经靠上最后一站的码头）"
+        }
+      ],
+      "next": "voyage"
+    },
+    {
+      "id": "sell_in_port",
+      "name": "卖货链头：在出货港核对港名 + 账上记着有货要卖，才按3进交易所",
+      "module": "sell",
+      "entry": true,
+      "trip_entry": "sell",
+      "condition": {
+        "type": "all",
+        "conditions": [
+          {
+            "type": "template",
+            "name": "UI-港口标志",
+            "threshold": 0.8
+          },
+          {
+            "type": "plan_port",
+            "region": "港口名字",
+            "from": "sell_port"
+          },
+          {
+            "type": "flag",
+            "name": "sell_pending",
+            "equals": true
+          }
+        ]
+      },
+      "actions": [
+        {
+          "type": "key",
+          "digit": 3
+        }
+      ],
+      "next": "sell_open_tab"
+    },
+    {
+      "id": "sell_open_tab",
+      "name": "进交易所点出售标签",
+      "module": "sell",
+      "entry": true,
+      "condition": {
+        "type": "template",
+        "name": "UI-交易所标志",
+        "threshold": 0.8
+      },
+      "actions": [
+        {
+          "type": "click_ocr",
+          "region": "购买出售标签",
+          "keyword": "出售"
+        },
+        {
+          "type": "wait",
+          "ms": 800
+        }
+      ],
+      "next": "sell_add_all"
+    },
+    {
+      "id": "sell_add_all",
+      "name": "出售页全部添加后等金色出售按钮亮起来再点（最多8秒），协商/确定/结算窗照买货那套走，卖完把待卖账清零",
+      "module": "sell",
+      "entry": true,
+      "condition": {
+        "type": "ocr",
+        "region": "右侧面板标题",
+        "contains": "出售"
+      },
+      "actions": [
+        {
+          "type": "click_template",
+          "name": "UI-全部添加",
+          "threshold": 0.9
+        },
+        {
+          "type": "wait",
+          "ms": 800
+        },
+        {
+          "type": "click_template_optional",
+          "name": "UI-出售",
+          "threshold": 0.95,
+          "timeout_ms": 8000,
+          "poll_interval_ms": 400
+        },
+        {
+          "type": "wait",
+          "ms": 1000
+        },
+        {
+          "type": "click_template_optional",
+          "name": "UI-确定",
+          "threshold": 0.85,
+          "timeout_ms": 3000,
+          "wait_ms": 1000
+        },
+        {
+          "type": "if",
+          "condition": {
+            "type": "any",
+            "conditions": [
+              {
+                "type": "ocr",
+                "region": "协商按钮区",
+                "contains": "进行1次"
+              },
+              {
+                "type": "ocr",
+                "region": "协商按钮区",
+                "contains": "进行所有剩余机会"
+              }
+            ]
+          },
+          "condition_timeout_ms": 6000,
+          "then": [
+            {
+              "type": "negotiation"
+            },
+            {
+              "type": "wait",
+              "ms": 800
+            },
+            {
+              "type": "click_template_optional",
+              "name": "UI-确定",
+              "threshold": 0.85,
+              "timeout_ms": 3000,
+              "wait_ms": 800,
+              "max_clicks": 2
+            }
+          ],
+          "else": [
+            {
+              "type": "click_template_optional",
+              "name": "UI-确定",
+              "threshold": 0.85,
+              "timeout_ms": 3000,
+              "wait_ms": 800,
+              "max_clicks": 2
+            }
+          ]
+        },
+        {
+          "type": "if",
+          "condition": {
+            "type": "template",
+            "name": "UI-结算结果-标题",
+            "threshold": 0.9
+          },
+          "condition_timeout_ms": 6000,
+          "then": [
+            {
+              "type": "click_after_template",
+              "anchor": "UI-结算结果-标题",
+              "name": "UI-确定",
+              "search_box": [
+                -340,
+                40,
+                680,
+                600
+              ],
+              "threshold": 0.9,
+              "wait_before_ms": 500
+            },
+            {
+              "type": "set_flag",
+              "name": "sell_pending",
+              "value": false
+            },
+            {
+              "type": "trip_next",
+              "after": "work",
+              "reason": "已卖出并关掉结算窗，待卖账清零，卖货这一趟结束",
+              "done_reason": "整趟走完：货已卖出、待卖账已清零"
+            }
+          ],
+          "else": [
+            {
+              "type": "stop",
+              "reason": "没看到结算结果窗 —— 待卖账保持不动（还是 1），请人到模拟器前看是什么挡住了"
+            }
+          ]
+        }
+      ],
+      "next": "sell_add_all"
+    }
+  ]
+}

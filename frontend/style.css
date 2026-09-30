@@ -1,0 +1,548 @@
+* { box-sizing: border-box; }
+body {
+  margin: 0; font-family: "Microsoft YaHei", system-ui, sans-serif;
+  background: #1e1e2e; color: #cdd6f4;
+}
+.app { display: flex; height: 100vh; }
+
+/* ============ 左侧一级导航栏 ============ */
+.nav {
+  width: 156px; flex-shrink: 0; background: #11111b;
+  border-right: 1px solid #313244; padding: 12px 10px;
+  display: flex; flex-direction: column; gap: 4px; overflow-y: auto;
+}
+.nav-brand { font-size: 14px; font-weight: 600; color: #89b4fa; margin-bottom: 12px; }
+.nav-brand .muted { display: block; font-weight: 400; font-size: 11px; }
+.nav-item {
+  display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+  background: transparent; color: #a6adc8; border: 1px solid transparent;
+  border-radius: 6px; padding: 8px 10px; cursor: pointer; font-size: 14px; font-family: inherit;
+}
+.nav-item:hover { background: #181825; color: #cdd6f4; }
+.nav-item.active { background: #181825; border-color: #45475a; color: #89b4fa; font-weight: 600; }
+.nav-ico { width: 16px; text-align: center; color: #6c7086; }
+.nav-item.active .nav-ico { color: #89b4fa; }
+.nav-txt { flex: 1; }
+.nav-dot { width: 8px; height: 8px; border-radius: 50%; background: #a6e3a1; }
+.nav-dot[hidden] { display: none; }
+.nav-legend {
+  margin-top: auto; padding-top: 14px; border-top: 1px solid #313244;
+  font-size: 11px; line-height: 1.7; color: #6c7086;
+}
+.nav-legend b { color: #a6adc8; font-weight: 600; }
+
+/* ============ 截图画面：常驻 + 可折叠 ============ */
+.screen-box {
+  border: 1px solid #313244; border-radius: 8px; background: #181825;
+  padding: 8px; margin-bottom: 14px;
+}
+.screen-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.screen-box[data-open="0"] .screen-head { margin-bottom: 0; }
+.screen-box[data-open="0"] .canvas-wrap { display: none; }
+.screen-box[data-open="0"] .zoom-group { display: none; }
+
+/* ============ 页面容器 ============ */
+.pages { min-width: 0; }
+.page { min-width: 0; }
+.page > h3:first-child { margin-top: 0; }
+
+/* 素材栏：模板库和 OCR 区域库并排两列，都是框选出来的命名判据 */
+.material-cols { display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap; }
+.material-col { flex: 1 1 360px; min-width: 320px; }
+.material-col h3 { margin: 0 0 8px; font-size: 15px; color: #89b4fa; }
+
+/* 设置栏：引擎参数分组 */
+.cfg-form { margin-top: 12px; }
+.cfg-group {
+  border: 1px solid #313244; border-radius: 8px; background: #181825;
+  padding: 12px; margin-bottom: 12px;
+}
+.cfg-group h4 { margin: 0 0 6px; font-size: 14px; color: #89b4fa; }
+.cfg-group .field-row { margin-top: 8px; }
+.cfg-bad { color: #f38ba8; font-size: 11px; }
+.cfg-bad[hidden] { display: none; }
+.field-bad input { border: 1px solid #f38ba8; }
+.cfg-h3 { margin: 20px 0 8px; font-size: 15px; color: #89b4fa; }
+
+/* 运行栏：状态那一行字 */
+.run-info {
+  margin: 12px 0 6px; padding: 8px 10px; border-radius: 6px;
+  background: #11111b; border: 1px solid #313244; font-size: 13px; color: #a6adc8;
+}
+#page-run .run-bar { margin-top: 0; padding-top: 0; border-top: none; }
+
+/* 补货倒计时那一行：只读，跟 .run-info 同族，靠左边一条色带区分状态 */
+.restock-info {
+  margin: 0 0 6px; padding: 7px 10px; border-radius: 6px;
+  background: #11111b; border: 1px solid #313244; font-size: 13px; color: #bac2de;
+}
+.restock-wait { border-left: 3px solid #f9e2af; color: #f9e2af; }
+.restock-ok   { border-left: 3px solid #a6e3a1; color: #a6e3a1; }
+.restock-err  { border-left: 3px solid #f38ba8; color: #f38ba8; }
+
+/* 设置栏：设备与环境，两列对齐（中文标签长短不一，等宽空格对不齐） */
+.dev-box { padding: 10px 12px; }
+.dev-sec { color: #89b4fa; font-size: 12px; margin: 10px 0 4px; }
+.dev-sec:first-child { margin-top: 0; }
+.dev-row { display: flex; gap: 12px; font-size: 12px; line-height: 1.8; }
+.dev-k { width: 132px; flex-shrink: 0; color: #a6adc8; }
+.dev-v { flex: 1; word-break: break-all; }
+.dev-v.mono { font-family: Consolas, "Courier New", monospace; }
+.dev-v.ok { color: #a6e3a1; }
+.dev-v.bad { color: #f38ba8; }
+
+/* 素材栏 / 旧侧栏共用的模板条目 */
+.template-list { margin-top: 12px; display: flex; flex-direction: column; gap: 10px; }
+.template-item {
+  border: 1px solid #45475a; border-radius: 8px; padding: 8px; background: #1f1f2e;
+}
+.template-item.selected { border-color: #89b4fa; }
+.t-item-head { display: flex; align-items: center; gap: 8px; }
+.t-item-head img { width: 48px; height: 48px; object-fit: contain; background: #11111b; border-radius: 4px; }
+.t-item-name {
+  flex: 1; background: #313244; border: none; color: #cdd6f4;
+  border-radius: 4px; padding: 2px 4px;
+}
+.t-item-meta { font-size: 11px; color: #a6adc8; margin: 6px 0; }
+.t-item-meta input {
+  background: #313244; border: none; color: #cdd6f4; width: 100%;
+  border-radius: 3px; padding: 2px 4px; font-size: 11px;
+}
+.t-item-actions { display: flex; gap: 6px; margin-top: 4px; }
+
+/* 模板库分类管理 */
+.tpl-toolbar { display: flex; gap: 6px; margin-top: 10px; }
+.tpl-toolbar input {
+  flex: 1; min-width: 0; background: #313244; border: none; color: #cdd6f4;
+  border-radius: 4px; padding: 4px 6px; font-size: 12px;
+}
+.tpl-count { font-size: 11px; color: #6c7086; }
+.tpl-group { margin-top: 2px; }
+.tpl-group-btn {
+  display: flex; align-items: center; gap: 6px; width: 100%; text-align: left;
+  background: #181825; color: #89b4fa; border: 1px solid #313244; border-radius: 6px;
+  padding: 4px 8px; font-size: 12px; cursor: pointer; font-family: inherit;
+}
+.tpl-group-btn:hover { border-color: #45475a; color: #b4befe; }
+.tpl-group-arrow { color: #6c7086; width: 12px; }
+.tpl-group-count { margin-left: auto; color: #6c7086; font-size: 11px; }
+.tpl-subgroup { margin-left: 10px; }
+.tpl-subgroup .tpl-group-btn {
+  background: transparent; border: none; color: #94e2d5; padding: 2px 4px; font-size: 11px;
+}
+.tpl-items { display: flex; flex-direction: column; gap: 8px; margin: 6px 0 0 8px; }
+.t-item-cat { margin-top: 6px; }
+.t-item-cat-input {
+  width: 100%; background: #313244; border: none; color: #cdd6f4;
+  border-radius: 3px; padding: 2px 4px; font-size: 11px;
+}
+.t-item-cat-input::placeholder { color: #6c7086; }
+
+/* 主区域 */
+.main { flex: 1; position: relative; overflow: auto; padding: 12px; }
+.info { font-size: 12px; color: #a6adc8; }
+.zoom-group { display: flex; align-items: center; gap: 4px; }
+
+/* 截图画布 */
+.canvas-wrap {
+  position: relative; display: inline-block;
+  background: #11111b; border-radius: 6px; border: 1px solid #313244;
+}
+#screen-img {
+  display: block; max-width: none; height: auto;
+  -webkit-user-drag: none; user-select: none;
+  -moz-user-select: none; -ms-user-select: none;
+}
+#overlay-canvas { position: absolute; top: 0; left: 0; pointer-events: auto; cursor: crosshair; }
+#region-label {
+  position: absolute; pointer-events: none; background: rgba(0,0,0,.7);
+  color: #89b4fa; font-size: 12px; padding: 2px 6px; border-radius: 4px;
+  white-space: nowrap;
+}
+
+/* 按钮 */
+.btn {
+  background: #313244; color: #cdd6f4; border: none; border-radius: 6px;
+  padding: 6px 14px; cursor: pointer; font-size: 13px;
+}
+.btn:hover { background: #45475a; }
+.btn.primary { background: #89b4fa; color: #1e1e2e; font-weight: 600; }
+.btn.block { width: 100%; }
+.btn.small { padding: 4px 10px; font-size: 12px; }
+.btn.danger { background: #3b2426; color: #f38ba8; }
+.btn.danger:hover { background: #512d31; }
+
+/* 模态框：默认隐藏，加 .open 类才显示，彻底不依赖 hidden 属性 */
+.modal {
+  position: fixed; inset: 0; background: rgba(0,0,0,.6);
+  display: none;  /* 默认隐藏，任何缓存都不影响 */
+  z-index: 100;
+}
+.modal.show {
+  display: flex;
+  align-items: center; justify-content: center;
+}
+.modal-box {
+  background: #181825; padding: 18px; border-radius: 10px; width: 380px;
+  border: 1px solid #45475a;
+}
+.modal-box label { display: block; margin: 8px 0; font-size: 13px; }
+.modal-box input[type=text],
+.modal-box input[type=number] {
+  width: 100%; background: #313244; border: none; color: #cdd6f4;
+  padding: 5px 8px; border-radius: 4px; margin-top: 4px;
+}
+.nt-preview { display: flex; align-items: center; gap: 12px; margin: 10px 0; }
+.nt-preview canvas { background: #11111b; border: 1px solid #45475a; border-radius: 4px; }
+.muted { color: #6c7086; font-size: 12px; word-break: break-all; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 14px; }
+
+/* 测试区 */
+.test-area {
+  margin-top: 20px; border-top: 1px solid #313244; padding-top: 14px;
+}
+.test-row { display: flex; align-items: center; gap: 12px; margin: 6px 0; flex-wrap: wrap; font-size: 13px; }
+.test-row select { background: #313244; color: #cdd6f4; border: none; border-radius: 4px; padding: 4px; }
+.test-row input {
+  background: #313244; color: #cdd6f4; border: none; border-radius: 4px; padding: 4px 6px;
+  width: 180px;
+}
+.result-box {
+  background: #11111b; border: 1px solid #313244; border-radius: 6px;
+  padding: 10px; font-size: 12px; white-space: pre-wrap; min-height: 60px; margin-top: 8px;
+}
+
+/* 标签页（「调试」栏里的二级 tab） */
+.tabbar { display: flex; gap: 4px; margin: 0 0 4px; border-bottom: 1px solid #313244; }
+.tab {
+  background: transparent; color: #a6adc8; border: none; border-bottom: 2px solid transparent;
+  padding: 8px 18px; cursor: pointer; font-size: 14px; border-radius: 6px 6px 0 0;
+}
+.tab:hover { color: #cdd6f4; }
+.tab.active { color: #89b4fa; border-bottom-color: #89b4fa; font-weight: 600; }
+.panel[hidden] { display: none; }
+
+/* 侧边栏 OCR 区域库标题 */
+.ocr-item-scene { font-size: 11px; color: #89b4fa; margin-bottom: 2px; }
+.ocr-item-params { font-size: 11px; color: #a6adc8; margin: 4px 0; }
+
+/* OCR 面板控件 */
+.ocr-param { display: flex; align-items: center; gap: 8px; }
+.ocr-param input[type=range] { width: 130px; cursor: pointer; accent-color: #89b4fa; }
+#panel-ocr select {
+  background: #313244; color: #cdd6f4; border: none; border-radius: 4px; padding: 4px;
+}
+#panel-ocr input[type=text] {
+  background: #313244; color: #cdd6f4; border: none; border-radius: 4px; padding: 4px 6px;
+}
+.ocr-ok { color: #a6e3a1; }
+.ocr-fail { color: #f38ba8; }
+
+/* ============ 状态机编辑器 ============ */
+.state-topbar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+.state-layout {
+  display: flex; height: calc(100vh - 170px); min-height: 360px;
+  border: 1px solid #313244; border-radius: 8px; overflow: hidden;
+}
+.state-list-col {
+  width: 280px; border-right: 1px solid #313244; padding: 12px;
+  overflow-y: auto; background: #181825; flex-shrink: 0;
+}
+.state-editor-col { flex: 1; overflow-y: auto; padding: 14px; }
+.state-list { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+.state-item {
+  border: 1px solid #45475a; border-radius: 8px; padding: 8px; background: #1f1f2e;
+}
+.state-item.selected { border-color: #89b4fa; }
+.state-item-head { cursor: pointer; }
+.state-item-name { font-weight: 600; }
+.state-item-id { font-size: 11px; color: #a6adc8; margin: 2px 0; }
+.state-item-meta { font-size: 11px; color: #89b4fa; margin-top: 4px; }
+.state-item-actions { display: flex; gap: 4px; margin-top: 6px; }
+.tag {
+  display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 3px;
+  margin-left: 4px; background: #313244; color: #cdd6f4;
+}
+.tag-entry { background: #3a4a3a; color: #a6e3a1; }
+.tag-global { background: #4a3a3a; color: #fab387; }
+.tag-module { background: #33364d; color: #89b4fa; }
+.tag-missing { background: #4a2f35; color: #f38ba8; }
+
+.editor-section { margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #313244; }
+.editor-section h4 { margin: 0 0 8px; font-size: 14px; color: #89b4fa; }
+.field-row { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 8px; align-items: flex-end; }
+.field { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+.field label { display: flex; flex-direction: column; gap: 2px; color: #a6adc8; }
+.field input, .field select {
+  background: #313244; color: #cdd6f4; border: none; border-radius: 4px;
+  padding: 5px 8px; font-size: 13px; min-width: 150px;
+}
+.field select[multiple] { min-height: 70px; }
+.field input[type=checkbox] { min-width: auto; }
+.checkbox { display: flex; align-items: center; gap: 6px; flex-direction: row; color: #cdd6f4; }
+.checkbox input { min-width: auto; }
+
+.cond-node, .action-node { border-left: 2px solid #45475a; padding-left: 10px; margin: 6px 0; }
+.cond-row, .action-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.cond-row select, .action-head select {
+  background: #313244; color: #cdd6f4; border: none; border-radius: 4px; padding: 4px;
+}
+.cond-body, .action-body { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; }
+.cond-sublist, .action-sublist {
+  margin-left: 14px; padding-left: 10px; border-left: 1px dashed #45475a; width: 100%;
+}
+.hint { margin: 4px 0; width: 100%; }
+
+/* 运行控制 + 日志 */
+.run-bar {
+  display: flex; align-items: center; gap: 12px;
+  margin-top: 14px; padding-top: 12px; border-top: 1px solid #313244; flex-wrap: wrap;
+}
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.log-title { margin: 12px 0 6px; font-size: 13px; color: #89b4fa; }
+.log-box {
+  max-height: 220px; overflow-y: auto; white-space: normal;
+  font-family: Consolas, "Courier New", monospace; font-size: 12px;
+}
+.log-line { padding: 1px 0; line-height: 1.5; }
+.log-time { color: #6c7086; margin-right: 6px; }
+.log-match { color: #a6e3a1; }
+.log-no_match { color: #a6adc8; }
+.log-warn { color: #f9e2af; }
+.log-error { color: #f38ba8; }
+.log-start, .log-stop, .log-transition, .log-exit_port { color: #89b4fa; }
+.log-action { color: #cba6f7; }
+.log-info { color: #9399b2; }
+
+/* ============ 跑商购物表格（三级：一级港口清单 + 二级货物清单 + 三级单件编辑） ============ */
+.plan-list { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+/* 一级港口清单：顶部一个搜索框，每行只有港口名 + 种数（2026-09-30：一级只留港口名） */
+.plan-port-searchbar { display: flex; align-items: center; gap: 10px; margin: 4px 0 2px; }
+.plan-port-search {
+  flex: 1 1 auto; background: #11111b; color: #cdd6f4; border: 1px solid #45475a;
+  border-radius: 6px; padding: 6px 10px; font-size: 13px;
+}
+.plan-port-search:focus { border-color: #89b4fa; outline: none; }
+.plan-port-sum { font-size: 12px; color: #a6adc8; white-space: nowrap; }
+.plan-port-row {
+  display: flex; align-items: center; gap: 12px; padding: 9px 12px;
+  border: 1px solid #313244; border-radius: 8px; background: #1e1f2c; cursor: pointer;
+}
+.plan-port-row:hover { border-color: #89b4fa; background: #26273a; }
+.plan-port-name { color: #89b4fa; font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+.plan-port-count { color: #a6adc8; font-size: 12px; }
+.plan-port-go { color: #45475a; font-size: 12px; margin-left: auto; }
+.plan-port-row:hover .plan-port-go { color: #89b4fa; }
+/* 还没填港口名的那组：港口名标红，点进去补名字 */
+.plan-port-row.warn .plan-port-name { color: #f38ba8; }
+/* 一级顶部那两行短说明 + 可折叠的全部规则（长说明摊在界面上会把清单挤得看不见） */
+#page-plan .hint.plan-short { margin: 8px 0 4px; }
+.plan-help { margin: 2px 0 8px; }
+.plan-help summary {
+  cursor: pointer; color: #89b4fa; font-size: 12px; padding: 4px 8px;
+  border: 1px solid #313244; border-radius: 6px; background: #181825;
+}
+.plan-help[open] summary { border-color: #45475a; }
+.plan-help .hint { margin-top: 6px; }
+/* 一个港口一组：组头就一行（港口框 + 种数 + 两个按钮），下面每件货只占一行字 */
+.plan-group {
+  border: 1px solid #313244; border-radius: 8px; padding: 8px 10px; background: #1e1f2c;
+}
+.plan-group-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.plan-group-head input.plan-port {
+  background: #11111b; color: #89b4fa; border: 1px solid #45475a; border-radius: 6px;
+  padding: 4px 8px; font-size: 14px; font-weight: 600; min-width: 150px;
+}
+.plan-group-count { font-size: 12px; color: #a6adc8; }
+.plan-group-actions { margin-left: auto; display: flex; gap: 6px; }
+.plan-goods { display: flex; flex-direction: column; margin-top: 6px; }
+/* 二级里的一行 = 一件货的入口，不是编辑器：只列货名，点整行进三级 */
+.plan-line {
+  display: flex; align-items: center; gap: 12px; padding: 5px 8px;
+  border-bottom: 1px solid #26273a; cursor: pointer;
+}
+.plan-line:last-child { border-bottom: none; }
+.plan-line:hover { background: #26273a; }
+.plan-line-goods { color: #cdd6f4; font-size: 13px; overflow-wrap: anywhere; }
+.plan-line-go { color: #45475a; font-size: 12px; margin-left: auto; }
+.plan-line:hover .plan-line-go { color: #89b4fa; }
+/* 货名在模板库里查不到的那一件：右边一个红点，整句人话在三级里看，二级不铺长文字 */
+.plan-line.warn .plan-line-goods::after { content: " ●"; color: #f38ba8; }
+/* 三级：单独一张卡，里面才是这一件的具体字段 */
+.plan-detail {
+  border: 1px solid #45475a; border-radius: 8px; padding: 12px; background: #232336;
+}
+.plan-detail-head {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding-bottom: 8px; margin-bottom: 8px; border-bottom: 1px dashed #45475a;
+}
+.plan-detail-title { color: #89b4fa; font-size: 14px; font-weight: 600; }
+.plan-detail-port { color: #a6adc8; font-size: 12px; }
+.plan-detail-head .btn.danger { margin-left: auto; }
+/* 缺模板的提醒：没话可说时留空，不占位 */
+.plan-warn { color: #f38ba8; font-size: 12px; }
+.plan-warn:empty { display: none; }
+#page-plan .field input[type=text] { min-width: 230px; }
+/* 船舱名由类别算出来，只读，所以底色更深、字用绿色，和可编辑框区分开 */
+#page-plan .field input.plan-cabin { background: #11111b; color: #a6e3a1; }
+/* 二级里的「货物名称」：输入框 + 它下面的下拉候选（纯文字，2026-09-29 你要求不放图）。
+   类名前缀 pgoods-（plan goods）—— .goods-* 已经被「跑商设置」那套勾选框占了，撞名会串样式。 */
+.pgoods-field { min-width: 300px; max-width: 620px; gap: 4px; }
+.pgoods-box { position: relative; }
+.pgoods-picked { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #a6adc8; margin-top: 4px; }
+.pgoods-current { color: #a6e3a1; overflow-wrap: anywhere; }
+/* 下拉浮在候选上，不推动下面的字段；focus 才展开，选完 / 移开焦点就收起 */
+.pgoods-drop {
+  position: absolute; left: 0; right: 0; top: calc(100% + 3px); z-index: 20;
+  display: flex; flex-direction: column; gap: 1px; max-height: 176px; overflow-y: auto;
+  border: 1px solid #45475a; border-radius: 6px; background: #11111b; padding: 3px;
+}
+.pgoods-drop.hidden { display: none; }
+.pgoods-item {
+  text-align: left; padding: 5px 8px; border: 1px solid transparent; border-radius: 4px;
+  background: transparent; color: #cdd6f4; font-size: 13px; cursor: pointer;
+}
+.pgoods-item:hover { background: #1e2030; border-color: #89b4fa; }
+/* 这一行已经选中的那件：绿字，一眼看到自己选了谁 */
+.pgoods-item.on { border-color: #a6e3a1; color: #a6e3a1; }
+/* 命中的那几个字加粗高亮，好确认「就是这几个字匹配上的」 */
+.pgoods-item b { color: #f9e2af; font-weight: 700; }
+.pgoods-empty { color: #6c7086; font-size: 12px; padding: 5px 8px; overflow-wrap: anywhere; }
+.run-row { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #a6adc8; }
+/* 本次港口改成只读显示了（要去「跑商设置」改），所以用深底 + 绿字，看着就像不能编辑 */
+.run-port-readonly {
+  background: #11111b; border: 1px solid #313244; border-radius: 4px;
+  padding: 5px 10px; font-size: 13px; color: #a6e3a1;
+}
+
+/* ============ 跑商设置（买货 / 中转 / 出货） ============ */
+/* 三段航线是一条线上的三站，竖着一张卡一张卡排下来比并排更好读顺序 */
+.route-cols { display: flex; flex-direction: column; gap: 14px; margin-top: 12px; }
+.route-module-card { margin-top: 12px; border-color: #585b70; }
+.route-card {
+  border: 1px solid #45475a; border-radius: 10px; padding: 12px 14px; background: #232336;
+}
+.route-card h3 {
+  margin: 0 0 10px; font-size: 15px; color: #89b4fa;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.route-step {
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  width: 22px; height: 22px; border-radius: 50%; background: #313244;
+  color: #f9e2af; font-size: 12px;
+}
+/* 没接后端的卡片以前用 .route-demo（虚线边框 + 橙色序号）标出来；
+   2026-09-29 中转段接进「完整一趟」后这张卡片没有了，规则也一起删掉 —— 留着会骗后来的人。 */
+#page-route .field input[type=text],
+#page-route .field select {
+  background: #313244; color: #cdd6f4; border: none; border-radius: 4px;
+  padding: 5px 8px; font-size: 13px; min-width: 230px;
+}
+.route-goods { margin-top: 10px; }
+/* 跑商方案列表：一条方案一行，左边名字+摘要，右边「读取 / 删除」 */
+.preset-list { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; font-size: 12px; }
+.preset-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  border: 1px solid #313244; border-radius: 6px; background: #11111b; padding: 7px 10px;
+}
+.preset-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.preset-name { color: #cdd6f4; font-size: 13px; word-break: break-all; }
+.preset-meta { color: #6c7086; }
+.preset-route { color: #89b4fa; word-break: break-all; }
+.preset-btns { display: flex; gap: 6px; flex: none; }
+/* 出货段只能一站：按住的那个「+ 加一个出货港」 */
+.btn.small:disabled { opacity: .45; cursor: not-allowed; }
+/* 后端算回来的「能不能跑」提醒：没事发生时整块不占位 */
+.route-warn { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.route-warn:empty { display: none; }
+.route-warn-item {
+  border: 1px solid #512d31; border-left: 3px solid #f38ba8; border-radius: 6px;
+  background: #2a1d22; color: #f38ba8; font-size: 12px; padding: 6px 10px;
+}
+.route-line { font-size: 12px; color: #a6adc8; margin-bottom: 6px; }
+.route-table { border-collapse: collapse; width: 100%; max-width: 720px; font-size: 12px; }
+.route-table th, .route-table td {
+  border-bottom: 1px solid #313244; padding: 4px 8px; text-align: left;
+}
+.route-table th { color: #89b4fa; font-weight: 600; }
+.route-goods-name { color: #a6e3a1; }
+.route-on { color: #a6e3a1; }
+.route-off { color: #f9e2af; }
+
+/* ---- 有序站次（2026-09-27：一趟 = 买货→中转→出货，段内按排的先后走） ---- */
+.stops { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+/* 一行站两行高：上面「序号 + 港口 + 上下移/删」，下面整行给备注。
+   写成网格而不是 flex：卡片窄的时候 flex 会把备注框挤成一条缝（实测 470px 宽就这样），
+   两行排版在任何宽度下都稳。 */
+.stop-row {
+  display: grid; gap: 6px; align-items: center;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+.stop-row .stop-seq { grid-area: 1 / 1; }
+.stop-row .stop-port { grid-area: 1 / 2; }
+.stop-row .stop-btns { grid-area: 1 / 3; }
+.stop-row .stop-note { grid-area: 2 / 1 / 3 / 4; }
+.stop-row .stop-port, .stop-row .stop-note {
+  background: #313244; color: #cdd6f4; border: none; border-radius: 4px;
+  padding: 5px 8px; font-size: 13px; min-width: 0;
+}
+.stop-row .stop-note { color: #a6adc8; }
+/* 行号是「整趟的第几站」，跨段连续，所以做成小圆块，和卡片标题那个序号一个样式 */
+.stop-seq {
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  min-width: 20px; height: 20px; border-radius: 50%; background: #313244;
+  color: #f9e2af; font-size: 11px;
+}
+.stop-btns { display: flex; gap: 4px; margin-left: auto; }
+.stop-btns .btn { min-width: 26px; }
+.btn.tiny { padding: 2px 7px; font-size: 11px; }
+/* ---- 买货站那一行下面挂的「这一站买什么」勾选块（2026-09-27：本次清单挪进跑商设置） ---- */
+/* 站次那一行是 3 列网格，勾选块整行宽占第 3 行 —— 和这一站待在同一个 .stop-row 里，
+   换港口时才能只重画这一块，不动正在打字的港口输入框。 */
+.stop-row .stop-goods {
+  grid-area: 3 / 1 / 4 / 4;
+  display: flex; flex-direction: column; gap: 4px;
+  border: 1px dashed #45475a; border-radius: 6px; background: #181825; padding: 6px 8px;
+}
+.goods-head { font-size: 11px; color: #89b4fa; }
+.goods-row { display: flex; align-items: center; gap: 8px; font-size: 12px; min-width: 0; }
+.goods-row label { display: flex; align-items: center; gap: 6px; cursor: pointer; min-width: 0; }
+.goods-row input[type="checkbox"] { accent-color: #89b4fa; flex-shrink: 0; }
+.goods-name { color: #a6adc8; overflow-wrap: anywhere; }
+.goods-row.on .goods-name { color: #a6e3a1; }
+.goods-cargo { color: #6c7086; font-size: 11px; flex-shrink: 0; }
+.goods-order {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 18px; height: 18px; border-radius: 4px; background: #2a2f42;
+  color: #f9e2af; font-size: 11px; margin-left: auto;
+}
+.goods-move { display: flex; gap: 3px; }
+.goods-move .btn { min-width: 22px; padding: 1px 6px; }
+.goods-stale {
+  border-left: 3px solid #f9a628; background: #2a2318; color: #f9e2af;
+  font-size: 11px; padding: 5px 8px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.goods-tip { font-size: 11px; color: #6c7086; }
+.goods-sum {
+  display: flex; align-items: center; gap: 8px; font-size: 12px; color: #a6adc8;
+  border-bottom: 1px solid #26263a; padding: 4px 0;
+}
+.goods-sum b { color: #89b4fa; }
+/* 「本次就是这一站」那一条描蓝边：这条线只画后端 derive() 认出来的那一站 */
+.goods-sum.goods-here { border-left: 2px solid #89b4fa; background: #1e2030; padding-left: 6px; }
+/* 整趟顺序那一行：横向排、放不下就换行，船当前所在的那一站描蓝边 */
+.stops-order { display: flex; flex-direction: column; gap: 8px; font-size: 12px; color: #a6adc8; }
+.stop-seq-line { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.stop-item {
+  display: inline-flex; align-items: center; gap: 5px;
+  border: 1px solid #45475a; border-radius: 6px; background: #181825; padding: 4px 8px;
+  color: #cdd6f4;
+}
+.stop-item b { color: #89b4fa; }
+.stop-here { border-color: #89b4fa; background: #26283d; }
+.stop-tag { color: #a6e3a1; font-size: 11px; }
+.stop-what { color: #6c7086; font-size: 11px; }
+.stop-arrow { color: #585b70; }
+.stop-next { color: #cdd6f4; }
+/* 「这一段是已保存那份算出来的，你的改动还没保存」—— 用黄色，和红字「会被拒绝」区分开 */
+.stop-stale { color: #f9e2af; }

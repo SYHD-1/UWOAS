@@ -1,0 +1,47 @@
+{
+  "presets": [
+    {
+      "name": "臭鱼-热那亚",
+      "run_module": "trip",
+      "stops": [
+        {
+          "stage": "buy",
+          "port": "汉堡",
+          "goods": [
+            "上等腌制鲱鱼"
+          ],
+          "note": ""
+        },
+        {
+          "stage": "sell",
+          "port": "热那亚",
+          "goods": [],
+          "note": "卖货这一趟：货舱里有什么卖什么"
+        }
+      ],
+      "saved_at": "2026-09-30 17:45"
+    },
+    {
+      "name": "臭鱼回程",
+      "run_module": "trip",
+      "stops": [
+        {
+          "stage": "buy",
+          "port": "热那亚",
+          "goods": [
+            "银制器皿",
+            "天鹅绒"
+          ],
+          "note": ""
+        },
+        {
+          "stage": "sell",
+          "port": "汉堡",
+          "goods": [],
+          "note": "卖货这一趟：货舱里有什么卖什么"
+        }
+      ],
+      "saved_at": "2026-09-30 22:25"
+    }
+  ]
+}

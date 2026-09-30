@@ -1,0 +1,408 @@
+[
+  {
+    "name": "UI-协商-标题",
+    "image": "templates/tpl_1789394191_0.png",
+    "roi": [
+      721,
+      172,
+      155,
+      42
+    ],
+    "threshold": 0.8
+  },
+  {
+    "name": "UI-交易所标志",
+    "image": "templates/tpl_1789397732_1.png",
+    "roi": [
+      1176,
+      138,
+      398,
+      56
+    ],
+    "threshold": 0.8
+  },
+  {
+    "name": "UI-超载出售-亮",
+    "image": "templates/tpl_1789398279_3.png",
+    "roi": [
+      878,
+      813,
+      174,
+      48
+    ],
+    "threshold": 0.95
+  },
+  {
+    "name": "商品-铃兰",
+    "image": "templates/tpl_1789564534_3.png",
+    "roi": [
+      325,
+      185,
+      100,
+      75
+    ],
+    "threshold": 0.8
+  },
+  {
+    "name": "商品-上等腌制鲱鱼",
+    "image": "templates/tpl_1789565067_4.png",
+    "roi": [
+      326,
+      185,
+      103,
+      74
+    ],
+    "threshold": 0.8
+  },
+  {
+    "name": "UI-购买",
+    "image": "templates/tpl_1789566120_5.png",
+    "roi": [
+      1363,
+      805,
+      182,
+      43
+    ],
+    "threshold": 0.8
+  },
+  {
+    "name": "UI-确定",
+    "image": "templates/tpl_1789568954_6.png",
+    "roi": [
+      811,
+      827,
+      180,
+      48
+    ],
+    "threshold": 0.8
+  },
+  {
+    "name": "商品-油画",
+    "image": "templates/tpl_1789634227_8.png",
+    "roi": [
+      698,
+      186,
+      105,
+      74
+    ],
+    "threshold": 0.8
+  },
+  {
+    "name": "商品-铜版画",
+    "image": "templates/tpl_1789636193_8.png",
+    "roi": [
+      326,
+      185,
+      102,
+      73
+    ],
+    "threshold": 0.8
+  },
+  {
+    "name": "UI-港口标志",
+    "image": "templates/tpl_1790145544_9.png",
+    "roi": [
+      37,
+      11,
+      80,
+      127
+    ],
+    "threshold": 0.8
+  },
+  {
+    "name": "图标-超载出售-红点",
+    "image": "templates/tpl_1790150426_11.png",
+    "roi": [
+      997,
+      803,
+      65,
+      50
+    ],
+    "threshold": 0.8,
+    "category": "UI/超载出售"
+  },
+  {
+    "name": "UI-出售补给品-亮",
+    "image": "templates/tpl_1790153694_11.png",
+    "roi": [
+      655,
+      800,
+      205,
+      74
+    ],
+    "threshold": 0.8
+  },
+  {
+    "name": "UI-超载出售-灰",
+    "image": "templates/tpl_1790153694_12.png",
+    "roi": [
+      862,
+      800,
+      205,
+      74
+    ],
+    "threshold": 0.8
+  },
+  {
+    "name": "UI-协商触发概率数字",
+    "image": "templates/tpl_1790155437_13.png",
+    "roi": [
+      1230,
+      700,
+      95,
+      45
+    ],
+    "threshold": 0.8
+  },
+  {
+    "name": "UI-成功率数字",
+    "image": "templates/tpl_1790155437_14.png",
+    "roi": [
+      1485,
+      700,
+      75,
+      45
+    ],
+    "threshold": 0.8
+  },
+  {
+    "name": "图标-关闭-X",
+    "image": "templates/tpl_1790156458_15.png",
+    "roi": [
+      1500,
+      6,
+      86,
+      70
+    ],
+    "threshold": 0.8,
+    "category": "UI"
+  },
+  {
+    "name": "图标-房子-退出",
+    "image": "templates/tpl_1790161157_16.png",
+    "roi": [
+      1500,
+      6,
+      86,
+      70
+    ],
+    "threshold": 0.8,
+    "category": "UI"
+  },
+  {
+    "name": "UI-船舱-无法搭乘-1行1列-贵金属仓库",
+    "image": "templates/tpl_1790170230_20.png",
+    "roi": [
+      331,
+      546,
+      424,
+      60
+    ],
+    "threshold": 0.9
+  },
+  {
+    "name": "UI-船舱-无法搭乘-1行2列-贵金属仓库",
+    "image": "templates/tpl_1790170230_21.png",
+    "roi": [
+      740,
+      546,
+      424,
+      60
+    ],
+    "threshold": 0.9
+  },
+  {
+    "name": "UI-船舱-无法搭乘-2行2列-宝石仓库",
+    "image": "templates/tpl_1790170230_22.png",
+    "roi": [
+      740,
+      703,
+      424,
+      60
+    ],
+    "threshold": 0.9
+  },
+  {
+    "name": "UI-船舱-可搭乘-1行2列-艺术作品管理室",
+    "image": "templates/tpl_1790174019_20.png",
+    "roi": [
+      740,
+      151,
+      423,
+      60
+    ],
+    "threshold": 0.9
+  },
+  {
+    "name": "UI-船舱-可搭乘-1行3列-艺术作品管理室",
+    "image": "templates/tpl_1790174019_21.png",
+    "roi": [
+      1148,
+      151,
+      424,
+      60
+    ],
+    "threshold": 0.9
+  },
+  {
+    "name": "UI-船舱-可搭乘-3行3列-艺术作品管理室",
+    "image": "templates/tpl_1790174019_22.png",
+    "roi": [
+      1148,
+      464,
+      424,
+      60
+    ],
+    "threshold": 0.9
+  },
+  {
+    "name": "商品-中国画",
+    "image": "templates/tpl_1790238833_23.png",
+    "roi": [
+      324,
+      184,
+      105,
+      78
+    ],
+    "threshold": 0.8
+  },
+  {
+    "name": "UI-结算结果-标题",
+    "image": "templates/tpl_1790262548_24.png",
+    "roi": [
+      0,
+      0,
+      1600,
+      900
+    ],
+    "threshold": 0.9,
+    "category": "UI/结算"
+  },
+  {
+    "name": "UI-海上",
+    "image": "templates/tpl_1790489672_25.png",
+    "roi": [
+      44,
+      50,
+      71,
+      66
+    ],
+    "threshold": 0.8
+  },
+  {
+    "name": "UI-地图-城市列表",
+    "image": "templates/tpl_1790492685_26.png",
+    "roi": [
+      41,
+      105,
+      42,
+      92
+    ],
+    "threshold": 0.8
+  },
+  {
+    "name": "UI-海上-重启自动移动",
+    "image": "templates/tpl_1790501773_27.png",
+    "roi": [
+      732,
+      816,
+      136,
+      27
+    ],
+    "threshold": 0.8
+  },
+  {
+    "name": "UI-出港所-标题",
+    "image": "templates/tpl_manual_28.png",
+    "roi": [
+      60,
+      0,
+      174,
+      92
+    ],
+    "threshold": 0.85,
+    "category": "UI/港口间移动"
+  },
+  {
+    "name": "UI-补给后出航",
+    "image": "templates/tpl_manual_29.png",
+    "roi": [
+      1388,
+      738,
+      188,
+      90
+    ],
+    "threshold": 0.85,
+    "category": "UI/港口间移动"
+  },
+  {
+    "name": "UI-城市移动",
+    "image": "templates/tpl_manual_30.png",
+    "roi": [
+      722,
+      800,
+      154,
+      77
+    ],
+    "threshold": 0.85,
+    "category": "UI/港口间移动"
+  },
+  {
+    "name": "UI-购买页-标题",
+    "image": "templates/tpl_restock_purchase_title.png",
+    "roi": [
+      1281,
+      106,
+      70,
+      44
+    ],
+    "threshold": 0.9,
+    "category": "UI/交易所"
+  },
+  {
+    "name": "UI-出售",
+    "image": "templates/tpl_sell_button.png",
+    "roi": [
+      1400,
+      800,
+      100,
+      55
+    ],
+    "threshold": 0.95,
+    "category": "UI/交易所"
+  },
+  {
+    "name": "UI-全部添加",
+    "image": "templates/tpl_sell_addall.png",
+    "roi": [
+      910,
+      817,
+      109,
+      40
+    ],
+    "threshold": 0.9,
+    "category": "UI/交易所"
+  },
+  {
+    "name": "商品-银制器皿",
+    "image": "templates/tpl_1790777827_34.png",
+    "roi": [
+      325,
+      397,
+      102,
+      72
+    ],
+    "threshold": 0.8
+  },
+  {
+    "name": "商品-天鹅绒",
+    "image": "templates/tpl_1790778291_35.png",
+    "roi": [
+      700,
+      401,
+      101,
+      70
+    ],
+    "threshold": 0.8
+  }
+]

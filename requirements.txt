@@ -1,0 +1,12 @@
+# UWOAS 运行依赖（图像识别 + 状态机 + 本地 Web 调试台）
+# 安装：pip install -r requirements.txt
+#
+# 说明：EasyOCR 会自动带上 torch / torchvision / Pillow / scipy 等，首次安装包比较大，
+# 首次识别某语言时还会联网下载模型（之后走本地缓存）。
+# 本机实测环境为 Python 3.14，EasyOCR 可用；PaddleOCR 在 3.14 上装不上，本项目未使用。
+
+fastapi
+uvicorn
+opencv-python
+numpy
+easyocr

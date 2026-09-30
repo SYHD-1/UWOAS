@@ -1,0 +1,37 @@
+# ==================== 运行时产物（每跑一次就重新生成，不进版本库）====================
+screen.png
+ocr_screen.png
+queue_screen.png
+state_screen.png
+state_screen_*.png
+list_screen.png
+debug_roi.png
+_diag_compare.png
+
+# 例外：自检要用的真图钉在 selfcheck/fixtures/（规矩 T-060），必须进库 ——
+# 少了它们，python selfcheck\run_all.py 会因为「图片不存在」当场崩掉。
+!selfcheck/fixtures/**
+
+# 运行状态：待卖账 / 进度之类的临时账本，各人机器上都不一样
+run_state.json
+
+# 现场录制的大图（本地留档用，单个就有 1~2MB）
+recordings/
+
+# ==================== Python ====================
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+
+# ==================== 编辑器 / 系统 ====================
+.vscode/
+.idea/
+.trae/
+*.log
+Thumbs.db
+desktop.ini

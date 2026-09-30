@@ -1,0 +1,52 @@
+{
+  "rows": [
+    {
+      "port": "北京",
+      "goods_name": "中国画",
+      "cargo_type": "艺术作品",
+      "note": ""
+    },
+    {
+      "port": "汉堡",
+      "goods_name": "上等腌制鲱鱼",
+      "cargo_type": "食品原料",
+      "note": ""
+    },
+    {
+      "port": "汉堡",
+      "goods_name": "铃兰",
+      "cargo_type": "香料",
+      "note": ""
+    },
+    {
+      "port": "热那亚",
+      "goods_name": "油画",
+      "cargo_type": "艺术作品",
+      "note": ""
+    },
+    {
+      "port": "热那亚",
+      "goods_name": "铜版画",
+      "cargo_type": "艺术作品",
+      "note": ""
+    },
+    {
+      "port": "比萨",
+      "goods_name": "油画",
+      "cargo_type": "艺术作品",
+      "note": ""
+    },
+    {
+      "port": "热那亚",
+      "goods_name": "银制器皿",
+      "cargo_type": "工艺品",
+      "note": ""
+    },
+    {
+      "port": "热那亚",
+      "goods_name": "天鹅绒",
+      "cargo_type": "纺织品",
+      "note": ""
+    }
+  ]
+}
