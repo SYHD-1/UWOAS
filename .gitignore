@@ -15,6 +15,13 @@ _diag_compare.png
 # 运行状态：待卖账 / 进度之类的临时账本，各人机器上都不一样
 run_state.json
 
+# ==================== 用户自定义跑商方案（不进版本库，模板见同名 .default.json）====================
+# 每个用户的进货表、路线、方案库、运行队列都不一样，不能被 git 覆盖或产生冲突
+purchase_plan.json
+route_plan.json
+route_presets.json
+run_queue.json
+
 # 现场录制的大图（本地留档用，单个就有 1~2MB）
 recordings/
 
