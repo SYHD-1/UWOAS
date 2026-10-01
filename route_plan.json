@@ -1,19 +1,18 @@
 {
   "run_module": "trip",
-  "current_port": "热那亚",
+  "current_port": "汉堡",
   "stops": [
     {
       "stage": "buy",
-      "port": "热那亚",
+      "port": "汉堡",
       "goods": [
-        "银制器皿",
-        "天鹅绒"
+        "上等腌制鲱鱼"
       ],
       "note": ""
     },
     {
       "stage": "sell",
-      "port": "汉堡",
+      "port": "热那亚",
       "goods": [],
       "note": "卖货这一趟：货舱里有什么卖什么"
     }
