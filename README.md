@@ -109,13 +109,33 @@ UWOAS_V0.1/
 ├─ templates.json         模板库登记表
 ├─ ocr_regions.json       OCR 区域登记表
 ├─ states.json            状态机配置
-├─ purchase_plan.json     购物清单数据
-├─ route_plan.json        当前路线
-├─ route_presets.json     方案库数据
-├─ run_queue.json         队列配置
+├─ purchase_plan.default.json    购物清单模板（入库，只作示例）
+├─ route_plan.default.json       当前路线模板（入库）
+├─ route_presets.default.json    方案库模板（入库）
+├─ run_queue.default.json        队列配置模板（入库）
+├─ purchase_plan.json     你自己的购物清单（本地文件，见下节，不进库）
+├─ route_plan.json        你自己的当前路线（本地文件）
+├─ route_presets.json     你自己的方案库（本地文件）
+├─ run_queue.json         你自己的队列（本地文件）
 ├─ 跑商一趟操作流程.txt    操作流程说明
 └─ 跑商流程.txt
 ```
+
+### 你的个人跑商数据（不进版本库）
+
+上面不带 `.default` 的那四个 `*.json` 存的是**每个人自己的**跑商数据（购物清单、路线、方案库、队列），
+它们已写进 [.gitignore](.gitignore)，**不随版本库分发** —— 这样你更新代码 / 别人拉取更新时，
+各自配好的方案不会被覆盖，也不会再出现 `git pull` 冲突。
+
+**第一次用不用手动建文件**：读不到就当空表处理（`load_plan()` / `load_route()` /
+`load_presets()` / `load_queue()` 都有这段兜底），在界面上配一遍自动就写出来了。
+想从示例起步，把对应的 `*.default.json` 复制一份、去掉 `.default` 即可：
+
+```bash
+copy purchase_plan.default.json purchase_plan.json
+```
+
+其余三个同理（`route_plan` / `route_presets` / `run_queue`）。
 
 ## 八、已知限制
 
