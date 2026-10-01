@@ -731,7 +731,13 @@ function switchPage(page) {
 
   if (page === "flow") { loadStates(); return; }
   if (page === "plan") { loadPlan(); return; }
-  if (page === "route") { loadPresetEditor(); return; }
+  if (page === "route") {
+    // 先当场收起，再去拉方案库和目录：loadPresetEditor 那两次 fetch 要一两百毫秒，
+    // 等它回来才收的话，进栏的一瞬间上一块还摊着，看着像没按你要的收。
+    switchRouteTab(null);
+    loadPresetEditor();
+    return;
+  }
   if (page === "settings") { loadSettings(); return; }
   if (page === "debug") { loadStepOptions(); return; }
   if (page === "run") { loadQueue(); pollStatus(); }
@@ -951,7 +957,7 @@ const ACTION_TYPES = [
   "click", "click_template", "click_template_optional", "click_ocr",
   "click_after_template", "swipe", "input", "key", "wait", "negotiation",
   "buy_commodities", "plan_advance", "set_flag", "retry_watch", "wait_restock",
-  "wait_arrival", "trip_next", "ensure_input", "confirm_city_move",
+  "wait_arrival", "trip_next", "ensure_input", "confirm_city_move", "exit_to_port",
   "goto", "stop", "if", "run_actions",
 ];
 // 运行态开关的名字必须和后端 run_state.py 里的 FLAGS 一字不差：
@@ -1021,6 +1027,9 @@ function defaultAction(type) {
       return { type: "confirm_city_move", name: "UI-城市移动", threshold: 0.85,
                region: "地图选中城市", timeout_ms: 6000, poll_interval_ms: 800,
                timeout_seconds: 60 };
+    case "exit_to_port":
+      return { type: "exit_to_port", max_clicks: 3, wait_ms: 1200,
+               port_marker: "UI-港口标志", timeout_seconds: 20 };
     case "trip_next":
       return { type: "trip_next", after: "work", reason: "", done_reason: "" };
     case "if": return { type: "if", condition: defaultCondition("template"), condition_timeout_ms: 0, then: [], else: [] };
@@ -1424,6 +1433,14 @@ function renderActionFields(a, body) {
       body.appendChild(divHint("interrupt（等待期间每轮顺手照看的动作，一般就是 retry_watch：航行中断了就点「重启自动移动」）。"
         + "它是这一步的一部分，不是动作列表里单独的一条，所以上面那排↑↓和删除对它没有作用。"));
       body.appendChild(buildActionNode(a.interrupt, [a.interrupt]));
+      break;
+    case "exit_to_port":
+      body.appendChild(numField("max_clicks（最多点几次右上角房子/X）", a.max_clicks, v => a.max_clicks = v));
+      body.appendChild(numField("wait_ms（每次点完等多久再重截屏）", a.wait_ms, v => a.wait_ms = v));
+      body.appendChild(selectField("port_marker（确认已经退回港口的模板）", tmpl, a.port_marker, v => a.port_marker = v));
+      body.appendChild(numField("timeout_seconds（本动作的看门狗，要够点完 max_clicks 轮）", a.timeout_seconds, v => a.timeout_seconds = v));
+      body.appendChild(divHint("只在链条收尾时用：看到右上角房子 / X 才点，点完重截屏，直到能用 port_marker 确认已经回到港口界面。"));
+      body.appendChild(divHint("卖货后必须先退回港口再 trip_next；否则下一段买货会从交易所页面读港口名，读不到就整趟卡住。退不回港口时这个动作会停止并弹窗喊人，不继续接下一段。"));
       break;
     case "trip_next":
       if (a.after !== "work" && a.after !== "arrive") a.after = "work";
@@ -2876,21 +2893,36 @@ window.addEventListener("beforeunload", (e) => {
   if (planDirty) e.preventDefault();   // 表格改动只存在内存里，误关页面会丢
 });
 
-/* ============ 跑商设置（只编方案：这一趟按顺序走哪几站 + 每站买什么） ============ */
-/* 分工（2026-09-30 结构重构后，「跑商设置」这一栏只编方案）：
+/* ============ 跑商设置（只编方案：这一趟按顺序走哪几站 + 每站买什么 + 买之前先做哪两件事） ============ */
+/* 分工（2026-09-30 结构重构后，「跑商设置」这一栏只编方案；2026-10-01 分成第二级三块）：
    「表格」栏 = purchase_plan.json = **纯目录**，只回答「哪个港口买得到哪些货」（外加改船舱要的类别）；
    这一栏 = route_presets.json = **方案库**，每个方案都是一整套完整流程：
-     · stops  有序站次：买货（可多个）→ 中转（可多个）→ 出货，每段内部也按这里的先后。
-              买货站额外挂 goods = 这一站要买的货（名称从该港的目录里挑，顺序就是买的顺序）。
+     · stops   有序站次：买货（可多个）→ 中转（可多个）→ 出货，每段内部也按这里的先后。
+               买货站额外挂 goods = 这一站要买的货（名称从该港的目录里挑，顺序就是买的顺序）。
+     · options 附加步骤（二级那两块）：refit = 购买前改舱（船种 / 哪几格 / 改成什么舱），
+               switch_config = 切换配置（只有个勾，占位）。**只记在方案里，引擎还没这两步**。
    方案里**不再有「本次跑哪个模块」**（后端 normalize_preset 一律按完整一趟 run_module=trip 存），
    也**没有「当前所在港」**：跑哪几个方案、按什么顺序、跑几遍 = 「运行」栏的队列（后端线程）；
    船现在停在哪个港 = 队列每趟启动前自己 OCR 读一次。
    route_plan.json 因此降级成**队列线程写出来的运行态产物**，这一栏既不读也不写它。
    「买货站买什么、开去哪一站」不由前端判断：后端 route_plan.derive() 一处算完，界面只显示结果。 */
-let routeSaved = null;      // 方案库里那一份的规整结果：{name, stops}
-let routeDraft = null;      // 编辑区草稿：{name, stops}
+let routeSaved = null;      // 方案库里那一份的规整结果：{name, stops, options}
+let routeDraft = null;      // 编辑区草稿：{name, stops, options}
 let routeCatalog = {};      // 港口 -> 该港在「表格」栏里的行（只读，用来生成勾选框）
 let routePorts = [];        // 「表格」栏填过的港口名（港口输入框的 datalist 候选）
+let routeCargoTypes = [];   // 「表格」栏那 17 种类别（改舱那一页的下拉候选，来自 /api/plan）
+
+/* 第二级的两个附加步骤（2026-10-01 你要求加的）。
+   REFIT_SHIPS / REFIT_SLOTS 和后端 route_presets.py 里那两个常量必须是同一份清单
+   （自检逐字比对两边）：界面上能选而盘上存不进 = 白填，盘上收着而界面上选不出 = 没人看得见。
+   清单只有这一种船 / 这三格 —— 船舱页判据模板就照着「改良荒木船」的那三格「可搭乘船舱」录的，
+   而「无法搭乘」栏那一头要花蓝钻，2026-09-23 你明确要求不碰，所以这里根本不列。 */
+const REFIT_SHIPS = ["改良荒木船"];
+const REFIT_SLOTS = ["1行2列", "1行3列", "3行3列"];
+const ROUTE_TABS = ["plan", "refit", "cfg"];
+// 2026-10-01 你补的口径：进栏时**三块都收起**，点哪一个才展开哪一个 —— 所以初始是 null（谁都没开），
+// 也不再把它记进 localStorage（记了就会在下次进栏时自己弹开一块，正好和你要的相反）。
+let routeTab = null;
 
 const STAGE_LABELS = { buy: "买货", transit: "中转", sell: "出货" };
 // 每一站归哪一段就进哪张卡片；boxes 是卡片容器的元素 id
@@ -2943,12 +2975,41 @@ function pickPreset(p) {
   return {
     name: (p.name || "").trim(),
     stops: pickStops(p.stops),
+    options: pickOptions(p.options),
   };
 }
 
-/* 要保存 / 要比对的那两样（方案名 + 站次）。港口、备注和货物名在交出去之前去掉两头空格 ——
+/* 附加步骤那份：界面上那三个字段 + 两个勾。
+   缺项一律补默认，不把「没填」当成「勾上了」—— 老方案文件里根本没有 options 这一项
+   （2026-10-01 之前存的），读回来得照样能编辑。 */
+function defaultOptions() {
+  return {
+    refit: { enabled: false, ship: REFIT_SHIPS[0], slots: [], cargo_type: "" },
+    switch_config: { enabled: false },
+  };
+}
+function pickOptions(o) {
+  const d = defaultOptions();
+  const src = (o && typeof o === "object") ? o : {};
+  const r = (src.refit && typeof src.refit === "object") ? src.refit : {};
+  const c = (src.switch_config && typeof src.switch_config === "object") ? src.switch_config : {};
+  return {
+    refit: {
+      enabled: r.enabled === true,
+      ship: String(r.ship || d.refit.ship).trim(),
+      // 仓位按 REFIT_SLOTS 的固定顺序存：它是「第几格」不是「先改哪个」，
+      // 存成点击顺序会让每次重开方案都像改动过。
+      slots: REFIT_SLOTS.filter(s => (Array.isArray(r.slots) ? r.slots : [])
+        .map(x => String(x).trim()).includes(s)),
+      cargo_type: String(r.cargo_type || "").trim(),
+    },
+    switch_config: { enabled: c.enabled === true },
+  };
+}
+
+/* 要保存 / 要比对的那三样（方案名 + 站次 + 附加步骤）。港口、备注和货物名在交出去之前去掉两头空格 ——
    后端也这么规整，两边口径一样，才不会一进来就满屏「有改动未保存」。键顺序要和 pickPreset 一致
-   （name 在前、站次里 stage/port/goods/note），否则 routeDirty() 的字符串比对会把「没改过」判成改过。 */
+   （name、stops、options），否则 routeDirty() 的字符串比对会把「没改过」判成改过。 */
 function coreOf(preset) {
   return {
     name: (preset.name || "").trim(),
@@ -2958,6 +3019,7 @@ function coreOf(preset) {
       goods: (s.goods || []).map(g => String(g).trim()).filter(Boolean),
       note: (s.note || "").trim(),
     })),
+    options: pickOptions(preset.options),
   };
 }
 function gatherRoute() { return coreOf(routeDraft); }
@@ -3004,6 +3066,7 @@ async function loadPresetEditor() {
     const plan = await getJson("/api/plan");
     routePorts = Array.isArray(plan.port_options) ? plan.port_options : [];
     routeCatalog = plan.catalog && typeof plan.catalog === "object" ? plan.catalog : {};
+    routeCargoTypes = Array.isArray(plan.cargo_types) ? plan.cargo_types : [];
   } catch (e) {
     status.textContent = "读「表格」栏目录失败: " + e.message
       + "（港口候选和勾货框会不完整，别的照常）";
@@ -3011,10 +3074,11 @@ async function loadPresetEditor() {
   renderPresets();
   const want = localStorage.getItem("uwo.preset") || (routeDraft && routeDraft.name) || "";
   const hit = presetRows.find(p => p.name === want) || presetRows[0] || null;
-  routeSaved = hit ? pickPreset(hit) : { name: "", stops: [] };
+  routeSaved = hit ? pickPreset(hit) : { name: "", stops: [], options: defaultOptions() };
   routeDraft = pickPreset(routeSaved);
   if (hit) localStorage.setItem("uwo.preset", hit.name);
   renderRoute();
+  switchRouteTab(null);   // 进栏时三块都收起，等你点上面哪一个才展开哪一个
   status.textContent = hit
     ? `正在编辑方案『${hit.name}』：${hit.stop_count} 站 —— 改完点「保存方案」`
     : (presetRows.length
@@ -3211,7 +3275,174 @@ function renderRouteBuyGoods() {
       + `到第 1 站买那一站勾的货，买完自动出港开去下一站，不用各点一次启动。</div>` : ""}`;
 }
 
-/* 把草稿整片刷到界面上。方案名从草稿回填到输入框（换方案、另存为之后要看得见）。 */
+/* ============ 第二级：购买前改舱 / 切换配置（两个带勾框的附加步骤） ============ */
+/* 二级只在「跑商设置」这一栏内部换面板，左侧那排一级导航一个字不动：
+   站次和这两步属于**同一份草稿**（方案名 + 站次 + 附加步骤），拆成一级导航就会出现
+   「切到别的栏，这份草稿算谁的」；混在站次那一页里排又会让勾框被十几行货物淹没。
+   两边都留一个勾框（二级标题上 + 面板里），写的是同一份草稿，刷界面时一起对齐。 */
+function routeOptions() {
+  if (!routeDraft) return null;
+  routeDraft.options = pickOptions(routeDraft.options);   // 老方案里可能根本没这一项
+  return routeDraft.options;
+}
+
+function switchRouteTab(tab) {
+  if (tab !== null && !ROUTE_TABS.includes(tab)) tab = "plan";
+  routeTab = tab;                                  // null = 三块全收起（进栏时就是这个状态）
+  document.querySelectorAll("#page-route .subtab").forEach(b =>
+    b.classList.toggle("active", b.dataset.rtab === tab));
+  const panels = { plan: "route-sub-plan", refit: "route-sub-refit", cfg: "route-sub-cfg" };
+  Object.entries(panels).forEach(([k, id]) => {
+    const el = $(id);
+    if (el) el.hidden = k !== tab;
+  });
+}
+
+/* 勾框 / 参数改完都要重画这两块面板，而面板里有勾框自己 —— 同步换掉 <input> 会让
+   label 把这次点击再转发一遍（见 refreshStopGoods 那条），所以一律排队到下一个任务。 */
+function refreshRouteOptions() {
+  setTimeout(() => { renderRouteOptions(); routeStatusLine(); }, 0);
+}
+
+function onOptionFlag(which, on) {
+  const o = routeOptions();
+  if (!o) return;
+  const key = which === "refit" ? "refit" : "switch_config";
+  o[key].enabled = !!on;
+  refreshRouteOptions();
+}
+
+function onRefitField(key, value) {
+  const o = routeOptions();
+  if (!o) return;
+  if (key === "slots" || !(key in o.refit)) return;
+  o.refit[key] = String(value || "").trim();
+  refreshRouteOptions();
+}
+
+function onRefitSlot(name, on) {
+  const o = routeOptions();
+  if (!o || !REFIT_SLOTS.includes(name)) return;
+  const set = new Set(o.refit.slots.filter(s => REFIT_SLOTS.includes(s)));
+  if (on) set.add(name); else set.delete(name);
+  o.refit.slots = REFIT_SLOTS.filter(s => set.has(s));   // 存成固定格序，不存点击顺序
+  refreshRouteOptions();
+}
+
+/* 这一趟要买的货分别是哪几类：从「表格」栏目录现算（方案里不存类别，见文件头分工）。
+   放在改舱这一页是为了对一眼 —— 舱只对<b>一类</b>货有加成，选的类别不在这一趟要跑的货里，
+   那这趟就是白花钱改舱，所以把它顶到眼前而不是等人自己去表格栏比。 */
+function planBuyCargoTypes() {
+  const out = [];
+  ((routeDraft || {}).stops || []).forEach(s => {
+    if (s.stage !== "buy") return;
+    const rows = routeCatalog[(s.port || "").trim()] || [];
+    (s.goods || []).forEach(g => {
+      const row = rows.find(r => (r.goods_name || "").trim() === g);
+      if (row && row.cargo_type && !out.some(x => x.cargo_type === row.cargo_type))
+        out.push({ cargo_type: row.cargo_type, goods: g });
+    });
+  });
+  return out;
+}
+
+function renderRouteOptions() {
+  const o = routeOptions() || defaultOptions();
+  [["flag-refit", o.refit.enabled], ["flag-cfg", o.switch_config.enabled],
+   ["refit-enabled", o.refit.enabled], ["cfg-enabled", o.switch_config.enabled]]
+    .forEach(([id, on]) => { const el = $(id); if (el) el.checked = on; });
+  const rs = $("flag-refit-state");
+  if (rs) {
+    rs.textContent = o.refit.enabled ? "要改" : "不改";
+    rs.classList.toggle("on", o.refit.enabled);
+  }
+  const cs = $("flag-cfg-state");
+  if (cs) {
+    cs.textContent = o.switch_config.enabled ? "已勾 · 还没实现" : "占位";
+    cs.classList.toggle("on", o.switch_config.enabled);
+  }
+  renderRefitBody(o.refit);
+  renderCfgBody(o.switch_config);
+}
+
+function renderRefitBody(o) {
+  const box = $("refit-body");
+  if (!box) return;
+  const shipOpts = REFIT_SHIPS
+    .map(s => `<option value="${escapeHtml(s)}"${s === o.ship ? " selected" : ""}>`
+      + `${escapeHtml(s)}（唯一录过判据的）</option>`).join("")
+    + `<option value="" disabled>（占位）别的船种 —— 船舱页一张模板都没录，选不了</option>`;
+  const slotRows = REFIT_SLOTS.map(s => {
+    const on = o.slots.includes(s);
+    return `<div class="goods-row${on ? " on" : ""}">
+      <label title="勾上 = 这一格要改成上面选的那个舱">
+        <input type="checkbox" data-slot="${escapeHtml(s)}"${on ? " checked" : ""}
+               onchange="onRefitSlot(this.dataset.slot, this.checked)">
+        <span class="goods-name">可搭乘 · ${escapeHtml(s)}</span></label>
+      <span class="goods-cargo">${escapeHtml(`UI-船舱-可搭乘-${s}-…`)}</span>
+    </div>`;
+  }).join("");
+  // 类别候选来自 /api/plan（和「表格」栏同一份 17 种）。读不到目录时至少让自己已选的那个还在，
+  // 不然下拉一打开就变成「（没选）」，看着像把方案里的值弄丢了。
+  const types = routeCargoTypes.length ? routeCargoTypes : (o.cargo_type ? [o.cargo_type] : []);
+  const cargoOpts = `<option value="">（没选）</option>` + types.map(t =>
+    `<option value="${escapeHtml(t)}"${t === o.cargo_type ? " selected" : ""}>`
+    + `大型${escapeHtml(t)}管理室</option>`).join("");
+  const miss = [];
+  if (!o.slots.length) miss.push("改哪几格没勾");
+  if (!o.cargo_type) miss.push("改成什么舱没选");
+  const buy = planBuyCargoTypes();
+  const buyLine = buy.length
+    ? `这一趟要买的货是这几类：<b>${escapeHtml(buy.map(x => `${x.cargo_type}（${x.goods}）`).join("、"))}</b>`
+      + (o.cargo_type && !buy.some(x => x.cargo_type === o.cargo_type)
+        ? ` —— <b class="route-off">『大型${escapeHtml(o.cargo_type)}管理室』不在这些类里</b>，`
+          + `改成这个舱对这一趟要跑的货没有加成（确实要这么改就忽略这句）` : "")
+    : `这一趟还没勾货 —— 要跑哪类货还没定，舱就按你自己的判断选。`;
+  box.innerHTML = `
+    <label class="opt-flag"><input type="checkbox" id="refit-enabled"${o.enabled ? " checked" : ""}
+      onchange="onOptionFlag('refit', this.checked)"> <b>本次购买前先去造船所改船舱</b></label>
+    <div class="opt-state">现在这一趟：<b>${o.enabled ? "要改舱" : "不改舱"}</b>
+      —— 不勾就是不做这一步，下面的参数只是留着下次用。</div>
+    <div class="field-row">
+      <div class="field"><label>船种（进造船所点哪艘船的「变更船舱」）
+        <select id="refit-ship" onchange="onRefitField('ship', this.value)">${shipOpts}</select></label></div>
+      <div class="field"><label>改成什么舱（选类别，船舱名按下边那条规则自动生成）
+        <select id="refit-cargo" onchange="onRefitField('cargo_type', this.value)">${cargoOpts}</select></label></div>
+      <div class="field"><label>船舱名（候选列表里那一行的文字，只读）
+        <input class="opt-cabin" type="text" readonly
+               value="${escapeHtml(o.cargo_type ? `大型${o.cargo_type}管理室` : "（没选类别）")}"></label></div>
+    </div>
+    <div class="opt-slots">
+      <div class="goods-head">改哪几格（勾上 = 这一格改成上面那个舱；全是「可搭乘」栏 = 金币档）</div>
+      ${slotRows}
+    </div>
+    ${o.enabled && miss.length
+      ? `<div class="route-warn-item">勾了『购买前改舱』还得说清：${escapeHtml(miss.join("、"))}`
+        + ` —— 这样存不进方案库（后端会拒）。不是挑剔：这一步点下去花的是真金币、改完退不回去，`
+        + `留半成品等于让将来那一步自己猜。</div>` : ""}
+    <div class="goods-tip">${buyLine}</div>
+    <div class="goods-tip">已经勾了 ${o.slots.length} 格，改完是 ${escapeHtml(o.cargo_type ? `大型${o.cargo_type}管理室` : "（没选类别）")}。
+      存进方案后，方案列表那一行会照后端算的那句念一遍（「改舱：船 的 N 格[…] → 大型XX管理室」）。</div>`;
+}
+
+function renderCfgBody(o) {
+  const box = $("cfg-body");
+  if (!box) return;
+  box.innerHTML = `
+    <label class="opt-flag"><input type="checkbox" id="cfg-enabled"${o.enabled ? " checked" : ""}
+      onchange="onOptionFlag('switch_config', this.checked)"> <b>本次购买前先换船队配置</b></label>
+    <div class="opt-state">现在这一趟：<b>${o.enabled ? "要换配置" : "不换配置"}</b></div>
+    <div class="field-row">
+      <div class="field"><label>换成哪一档配置 <b class="route-off">（占位 · 还没有候选可选）</b>
+        <input type="text" disabled placeholder="（占位）那几档配置叫什么、画面上长什么样，一个字都没记过"></label></div>
+    </div>
+    <div class="route-warn-item"><b>这一整块是占位符</b>：勾上只是把「这一趟要换配置」记在方案里，
+      引擎没有对应的动作，点启动不会去菜单里换配置。</div>`;
+}
+
+/* 把草稿整片刷到界面上。方案名从草稿回填到输入框（换方案、另存为之后要看得见）。
+   第二级那两块（改舱 / 切换配置）也在这里刷：它们和站次是同一份草稿，
+   分开刷会出现「站次已经换了一份方案、附加步骤还挂着上一份的勾」。 */
 function renderRoute() {
   fillRoutePortOptions();
   const nameEl = $("preset-name");
@@ -3219,6 +3450,7 @@ function renderRoute() {
   renderStops();
   renderStopsOrder();
   renderRouteBuyGoods();
+  renderRouteOptions();
   routeStatusLine();
 }
 
@@ -3230,6 +3462,7 @@ function onStopField(i, key, v) {
   if (key === "port") refreshStopGoods(i);
   renderStopsOrder();
   renderRouteBuyGoods();
+  refreshRouteOptions();   // 改舱那一页的「这一趟要跑哪几类货」跟着站次走
   routeStatusLine();
 }
 
@@ -3243,6 +3476,7 @@ function onStopGoods(i, name, on) {
   refreshStopGoods(i);
   renderStopsOrder();
   renderRouteBuyGoods();
+  refreshRouteOptions();   // 「这一趟要跑哪几类货」那一行跟着勾货变
   routeStatusLine();
 }
 
@@ -3257,6 +3491,7 @@ function stopGoodsMove(i, name, delta) {
   refreshStopGoods(i);
   renderStopsOrder();
   renderRouteBuyGoods();
+  refreshRouteOptions();   // 「这一趟要跑哪几类货」那一行跟着勾货变
   routeStatusLine();
 }
 
@@ -3269,6 +3504,7 @@ function dropStaleGoods(i) {
   refreshStopGoods(i);
   renderStopsOrder();
   renderRouteBuyGoods();
+  refreshRouteOptions();   // 「这一趟要跑哪几类货」那一行跟着勾货变
   routeStatusLine();
 }
 
@@ -3286,6 +3522,7 @@ function stopAdd(stage) {
   renderStops();
   renderStopsOrder();
   renderRouteBuyGoods();
+  refreshRouteOptions();
   routeStatusLine();
   const el = document.querySelector(`.stop-row[data-i="${at}"] .stop-port`);
   if (el) el.focus();   // 点完「+ 加一个」就能直接打字，不用再瞄一次鼠标
@@ -3301,6 +3538,7 @@ function stopMove(i, delta) {
   renderStops();
   renderStopsOrder();
   renderRouteBuyGoods();
+  refreshRouteOptions();
   routeStatusLine();
 }
 
@@ -3312,6 +3550,7 @@ function stopDelete(i) {
   renderStops();
   renderStopsOrder();
   renderRouteBuyGoods();
+  refreshRouteOptions();
   routeStatusLine();
 }
 
@@ -3348,11 +3587,12 @@ async function saveRoute() {
     && name !== ((routeSaved && routeSaved.name) || "");
   if (dup && !confirm(`已经有叫『${name}』的方案了，覆盖它？\n（只改方案库这一条，不影响正在跑的那一趟）`)) return;
   routeDraft.name = name;
+  const core = coreOf(routeDraft);
   let res, out;
   try {
     res = await fetch("/api/route/presets", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, stops: coreOf(routeDraft).stops }),
+      body: JSON.stringify({ name, stops: core.stops, options: core.options }),
     });
     out = await res.json().catch(() => ({}));
   } catch (e) {
@@ -3365,12 +3605,13 @@ async function saveRoute() {
   }
   await loadPresets();
   const hit = presetRows.find(p => p.name === name);
-  routeSaved = hit ? pickPreset(hit) : { name, stops: coreOf(routeDraft).stops };
+  routeSaved = hit ? pickPreset(hit) : { name, stops: core.stops, options: core.options };
   routeDraft = pickPreset(routeSaved);
   localStorage.setItem("uwo.preset", routeSaved.name);
   renderRoute();
   status.textContent = `已${out.replaced ? "覆盖" : "存下"}方案『${name}』`
     + `：${out.preset.route_text}（勾 ${out.preset.goods_count} 件货）`
+    + (out.preset.options_text ? ` ｜ ${out.preset.options_text}` : "")
     + reorderNote(out);
 }
 
@@ -3378,13 +3619,15 @@ async function saveRoute() {
    直接改名字框的值最省事，草稿和方案库因此对不上，状态行会自动念「有改动还没保存」。 */
 function presetSaveAsNew() {
   routeDraft.name = "";
+  switchRouteTab("plan");          // 方案名那一格在这块里，收着的时候点它要看得见
   const el = $("preset-name");
   if (el) { el.value = ""; el.focus(); }
   routeStatusLine();
 }
 
 /* ==================== 方案库（preset）：整套流程存个名字 / 装回编辑区 ====================
-   方案 = 站次 + 每站勾的货（**不含当前所在港**，2026-09-29 你选的口径；也**不含「跑哪个模块」**，
+   方案 = 站次 + 每站勾的货 + 附加步骤那两块（购买前改舱 / 切换配置，2026-10-01 加的第二级；
+   **不含当前所在港**，2026-09-29 你选的口径；也**不含「跑哪个模块」**，
    2026-09-30 起方案一律是完整一趟 trip）。存在 route_presets.json，
    **引擎一个字都不读它** —— 真跑哪几个方案在「运行」栏排成队列，由队列线程铺 route_plan.json。
    列表按下标传参（不往 onclick 里塞中文方案名：引号/转义一错就点不动，下标不会）。 */
@@ -3420,6 +3663,7 @@ function renderPresets() {
         <span class="preset-meta">${p.stop_count} 站`
         + `${p.goods_count ? ` · 勾 ${p.goods_count} 件货` : " · 没勾货"} · 存于 ${escapeHtml(p.saved_at || "（没记时间）")}</span>
         <div class="preset-route">${escapeHtml(p.route_text)}</div>
+        ${p.options_text ? `<div class="preset-extra">${escapeHtml(p.options_text)}</div>` : ""}
       </div>
       <div class="preset-btns">
         <button class="btn small primary" onclick="presetEditByIdx(${i})">编辑</button>
@@ -3437,6 +3681,8 @@ function presetEditByIdx(i) {
   routeDraft = pickPreset(p);
   localStorage.setItem("uwo.preset", routeSaved.name);
   renderRoute();
+  // 进栏默认是收起的：点「编辑」要看的就是这一块，不顺手展开会像点了没反应
+  switchRouteTab("plan");
   const st = $("route-status");
   if (st) st.textContent = `正在编辑方案『${routeSaved.name}』：${p.stop_count} 站 —— 改完点「保存方案」`;
 }

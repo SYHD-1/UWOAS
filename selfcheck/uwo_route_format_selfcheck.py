@@ -435,8 +435,8 @@ try:
         "stops": [{"stage": "buy", "port": "北京", "goods": ["中国画", "油画"]},
                   {"stage": "sell", "port": "热那亚", "note": "货舱里有什么卖什么"}]})
     check("方案名两边的空格去掉", p["name"] == "北京买画 → 热那亚卖货", p["name"])
-    check("方案就是四项 {name, run_module, stops, saved_at}",
-          set(p) == {"name", "run_module", "stops", "saved_at"}, str(sorted(p)))
+    check("方案就是五项 {name, run_module, stops, options, saved_at}",
+          set(p) == {"name", "run_module", "stops", "options", "saved_at"}, str(sorted(p)))
     check("方案一律是完整一趟：前端传 buy 也被写成 trip（2026-09-30 起跑商设置不再分类型）",
           p["run_module"] == rp.TRIP_MODULE, p["run_module"])
     check("方案里根本没有「当前所在港」这一项（你 2026-09-29 选的口径）",
@@ -445,6 +445,34 @@ try:
           len(p["saved_at"]) == 16 and p["saved_at"][4] == "-", p["saved_at"])
     check("每一站照样被规整成那四个字段（走 route_plan 同一套校验）",
           all(set(s) == set(rp.STOP_KEYS) for s in p["stops"]), str(p["stops"])[:70])
+    # ---- 第二级（2026-10-01）：购买前改舱 / 切换配置 ----
+    check("没传 options 就补一份全关掉的（2026-10-01 之前存的方案照样读得动，不是报错）",
+          p["options"] == {"refit": {"enabled": False, "ship": "改良荒木船",
+                                     "slots": [], "cargo_type": ""},
+                           "switch_config": {"enabled": False}}, str(p["options"])[:90])
+    pr = rps.normalize_preset({
+        "name": "带改舱", "stops": [{"stage": "buy", "port": "北京", "goods": ["中国画"]}],
+        "options": {"refit": {"enabled": True, "ship": "改良荒木船",
+                              "slots": ["3行3列", "1行2列"], "cargo_type": "艺术作品"},
+                    "switch_config": {"enabled": False}}})
+    check("改舱的三项参数原样存下来（开关 / 船种 / 类别）",
+          pr["options"]["refit"]["enabled"] is True
+          and pr["options"]["refit"]["ship"] == "改良荒木船"
+          and pr["options"]["refit"]["cargo_type"] == "艺术作品", str(pr["options"]["refit"])[:90])
+    check("勾的格子存成固定格序（1行2列 在前、3行3列 在后），不是点击顺序 —— "
+          "存点击顺序的话重开一次方案就像改动过",
+          pr["options"]["refit"]["slots"] == ["1行2列", "3行3列"], str(pr["options"]["refit"]["slots"]))
+    check("船种清单就一个：只有录过船舱页判据模板的那艘（改良荒木船，2026-09-23 实测）",
+          rps.REFIT_SHIPS == ["改良荒木船"], str(rps.REFIT_SHIPS))
+    check("能改的格子全是「可搭乘」栏 = 金币档；「无法搭乘」那些花蓝钻，根本不列进候选",
+          rps.REFIT_SLOTS == ["1行2列", "1行3列", "3行3列"], str(rps.REFIT_SLOTS))
+    check("类别就是「表格」栏那 17 种（复用 purchase_plan 一份清单，不另起名字）",
+          len(rps.purchase_plan.CARGO_TYPES) == 17
+          and "艺术作品" in rps.purchase_plan.CARGO_TYPES, str(len(rps.purchase_plan.CARGO_TYPES)))
+    check("切换配置那一项只认一个开关（参数还没得配，多出来的项目一律拒）",
+          rps.normalize_options({"switch_config": {"enabled": True}})
+          == {"refit": {"enabled": False, "ship": "改良荒木船", "slots": [], "cargo_type": ""},
+              "switch_config": {"enabled": True}}, str(rps.normalize_options({"switch_config": {"enabled": True}}))[:90])
     for bad, label in [
         ({"name": "", "run_module": "buy", "stops": [{"stage": "buy", "port": "北京"}]},
          "方案名是空的要拒绝（方案靠名字读）"),
@@ -460,6 +488,47 @@ try:
         ({"name": "问" * 41, "stops": [{"stage": "buy", "port": "北京"}]}, "方案名太长要拒绝"),
         ({"name": 123, "stops": [{"stage": "buy", "port": "北京"}]}, "方案名不是文字要拒绝"),
         ({"name": "甲", "stops": [{"stage": "buy", "port": ""}]}, "站里港名空要拒绝"),
+        # 第二级那两块的拒绝分支：这一步点下去花真金币、改完退不回去，半成品不许存进方案库
+        ({"name": "甲", "stops": [{"stage": "buy", "port": "北京"}],
+          "options": {"refit": {"enabled": True, "ship": "改良荒木船",
+                                "slots": [], "cargo_type": "艺术作品"}}},
+         "勾了『购买前改舱』却一格都没勾要拒绝"),
+        ({"name": "甲", "stops": [{"stage": "buy", "port": "北京"}],
+          "options": {"refit": {"enabled": True, "ship": "改良荒木船",
+                                "slots": ["1行2列"], "cargo_type": ""}}},
+         "勾了『购买前改舱』却没选改成什么舱要拒绝"),
+        ({"name": "甲", "stops": [{"stage": "buy", "port": "北京"}],
+          "options": {"refit": {"enabled": True, "ship": "皇家商船",
+                                "slots": ["1行2列"], "cargo_type": "艺术作品"}}},
+         "船种没录过船舱页判据要拒绝（存进去那一步会去点一个它不认识的画面）"),
+        ({"name": "甲", "stops": [{"stage": "buy", "port": "北京"}],
+          "options": {"refit": {"enabled": True, "ship": "改良荒木船",
+                                "slots": ["无法搭乘-1行1列"], "cargo_type": "宝石"}}},
+         "「无法搭乘」那一栏的格子要拒绝（那些花蓝钻，2026-09-23 你明确要求不碰）"),
+        ({"name": "甲", "stops": [{"stage": "buy", "port": "北京"}],
+          "options": {"refit": {"enabled": True, "ship": "改良荒木船",
+                                "slots": ["1行2列", "1行2列"], "cargo_type": "宝石"}}},
+         "同一格勾两遍要拒绝"),
+        ({"name": "甲", "stops": [{"stage": "buy", "port": "北京"}],
+          "options": {"refit": {"enabled": True, "ship": "改良荒木船",
+                                "slots": ["1行2列"], "cargo_type": "货物-宝石"}}},
+         "类别不在那 17 种里要拒绝"),
+        ({"name": "甲", "stops": [{"stage": "buy", "port": "北京"}],
+          "options": {"refit": {"enabled": True, "ship": "改良荒木船", "slots": ["1行2列"],
+                                "cargo_type": "宝石", "cabin_name": "大型宝石管理室"}}},
+         "附加步骤里多出一个不认识的项目要拒绝（船舱名是算出来的，存两份迟早对不上）"),
+        ({"name": "甲", "stops": [{"stage": "buy", "port": "北京"}],
+          "options": {"switch_config": {"enabled": True, "config_name": "买货量+15%"}}},
+         "『切换配置』除了开关还塞参数要拒绝（这一项是占位符，没有能校验的参数）"),
+        ({"name": "甲", "stops": [{"stage": "buy", "port": "北京"}],
+          "options": {"refitx": {"enabled": True}}},
+         "附加步骤里出现不认识的名字要拒绝"),
+        ({"name": "甲", "stops": [{"stage": "buy", "port": "北京"}], "options": []},
+         "options 不是对象要拒绝"),
+        ({"name": "甲", "stops": [{"stage": "buy", "port": "北京"}],
+          "options": {"refit": {"enabled": "yes", "ship": "改良荒木船",
+                                "slots": ["1行2列"], "cargo_type": "宝石"}}},
+         "开关写成文字要拒绝（要/不要就是勾框，别的都不算）"),
     ]:
         try:
             rps.normalize_preset(bad)
@@ -491,17 +560,55 @@ try:
     except ValueError as e:
         check("文件内容不认 → 抛错而不是给你一份空列表（空列表看着像「我没存过」）",
               True, str(e)[:60])
+    rps.save_presets([p, pr])
+    back2 = rps.load_presets()
+    check("带改舱参数的方案落盘再读回来一模一样（勾了哪几格、改成什么舱都不丢）",
+          back2[1]["options"] == pr["options"], str(back2[1]["options"])[:90])
+    with open(TMPPRE, "w", encoding="utf-8") as f:
+        json.dump({"presets": [{"name": "老方案", "run_module": "trip",
+                                "saved_at": "2026-09-29 15:20",
+                                "stops": [{"stage": "buy", "port": "北京",
+                                           "goods": ["油画"], "note": ""}]}]}, f, ensure_ascii=False)
+    old = rps.load_presets()[0]
+    check("盘上那一份根本没有 options（第二级是 2026-10-01 才加的）→ 读回来补全关掉的，不报错",
+          old["options"]["refit"]["enabled"] is False
+          and old["options"]["switch_config"]["enabled"] is False, str(old["options"])[:90])
+    with open(TMPPRE, "w", encoding="utf-8") as f:
+        json.dump({"presets": [dict(p, options={"refit": {"enabled": True, "ship": "皇家商船",
+                                                          "slots": ["1行2列"],
+                                                          "cargo_type": "宝石"}})]}, f, ensure_ascii=False)
+    try:
+        rps.load_presets()
+        check("人手把盘上的船种改成没录过判据的 → 读的时候就报，不等点启动才炸", False)
+    except ValueError as e:
+        check("人手把盘上的船种改成没录过判据的 → 读的时候就报，不等点启动才炸",
+              "判据" in str(e), str(e)[:70])
     rps.save_presets([p])
     sm = rps.summary(p)
     check("摘要一行讲清：几站、怎么走、几件货",
           sm["stop_count"] == 2 and sm["route_text"] == "买货·北京 → 出货·热那亚"
           and sm["goods_count"] == 2, str(sm))
+    sm2 = rps.summary(pr)
+    check("摘要带着附加步骤：不用点进二级，方案列表那一行就能看出这趟要先去造船所",
+          sm2["options"]["refit"]["enabled"] is True
+          and sm2["options_text"] == "改舱：改良荒木船 的 2 格[1行2列、3行3列] → 大型艺术作品管理室",
+          sm2["options_text"])
+    check("两项都没开时 options_text 是空串（列表那一行不多占一行）",
+          sm["options_text"] == "", repr(sm["options_text"]))
+    cfg_on = rps.normalize_preset({
+        "name": "带换配置", "stops": [{"stage": "buy", "port": "北京"}],
+        "options": {"switch_config": {"enabled": True}}})
+    check("『切换配置』勾上了也只念成「还没实现」（界面上不许看着像已经配好了）",
+          "还没实现" in rps.summary(cfg_on)["options_text"], rps.summary(cfg_on)["options_text"])
     check("find 按名字拿到整份（含站次），名字对不上给 None",
           rps.find([p], p["name"]) is p and rps.find([p], "没有这个名字") is None)
     t = rps.to_route(p, "热那亚")
     check("to_route：方案 + 界面上现在的当前港 → 一份能直接写进 route_plan.json 的规划",
           set(t) == set(rp.DEFAULTS) and t["current_port"] == "热那亚"
           and t["run_module"] == rp.TRIP_MODULE, str(sorted(t)))
+    check("to_route 不把 options 交给规划：引擎还没有「改舱 / 换配置」这两步，"
+          "写进一个没人读的文件比不写更坏（界面上那两块都写清了只是记在方案里）",
+          "options" not in rps.to_route(pr, "北京"), str(sorted(rps.to_route(pr, "北京"))))
     check("to_route 的产物过得了规划那一套校验（不会「存得进方案、读出来保存不了」）",
           rp.normalize_route(t)["stops"][1]["port"] == "热那亚")
     t["stops"][0]["goods"].append("走私货")
@@ -551,6 +658,22 @@ try:
               {"route_text", "stop_count", "goods_count", "stops"}
               <= set(appmod.route_preset_list()["presets"][0]),
               str(sorted(appmod.route_preset_list()["presets"][0])))
+        # 第二级那两个勾框走的是同一条存盘线：界面上勾了，盘上就得真存着，列表那一行得念得出来
+        appmod.route_preset_save(dict(A, options={
+            "refit": {"enabled": True, "ship": "改良荒木船",
+                      "slots": ["1行2列"], "cargo_type": "艺术作品"},
+            "switch_config": {"enabled": True}}))
+        row = [x for x in appmod.route_preset_list()["presets"] if x["name"] == "方案甲"][0]
+        check("列表里现在也带 options / options_text 两项（界面那一行不用点进二级就知道要不要改舱）",
+              {"options", "options_text"} <= set(row), str(sorted(row)))
+        check("接口存 options：界面勾的格子、选的类别、那个配置勾都真落盘了",
+              row["options"]["refit"]["slots"] == ["1行2列"]
+              and row["options"]["refit"]["cargo_type"] == "艺术作品"
+              and row["options"]["switch_config"]["enabled"] is True, str(row["options"])[:90])
+        check("列表那一行念得出「改舱：改良荒木船 的 1 格[…] → 大型艺术作品管理室」，"
+              "配置那一项也当场说清「还没实现」",
+              "改舱：改良荒木船 的 1 格[1行2列] → 大型艺术作品管理室" in row["options_text"]
+              and "还没实现" in row["options_text"], row["options_text"])
         r = appmod.route_preset_load({"name": "方案甲"})
         check("读取方案 → 立刻写进 route_plan.json 生效（你拍的「立即生效」，少一步）",
               rp.load_route()["run_module"] == rp.TRIP_MODULE
@@ -563,6 +686,9 @@ try:
               r["loaded_from"] == "方案甲" and r["derived"]["sell_port"] == "热那亚"
               and r["derived"]["buy_stop_idx"] == -1,
               str(r["derived"]["sell_reason"])[:60])
+        check("读一个带着改舱的方案 → 写进规划的还是那三项 {run_module, current_port, stops}："
+              "route_plan 那一层不认识 options，多塞一个字段整条链会在启动前就炸",
+              set(rp.load_route()) == set(rp.DEFAULTS), str(sorted(rp.load_route())))
         for bad, label, code in [
             ({}, "没说要读哪个方案 → 400", 400),
             ({"name": "  "}, "方案名只有一串空格 → 400", 400),
@@ -583,6 +709,25 @@ try:
                   e.status_code == 400 and "只能有一站" in str(e.detail),
                   f"{e.status_code} {str(e.detail)[:50]}")
         check("上面那次被拒的存盘没留下半个方案（拒绝发生在写文件之前）",
+              [x["name"] for x in appmod.route_preset_list()["presets"]] == ["方案甲", "方案乙"],
+              str([x["name"] for x in appmod.route_preset_list()["presets"]]))
+        for badopt, label in [
+            ({"refit": {"enabled": True, "ship": "法兰西大商船",
+                        "slots": ["1行2列"], "cargo_type": "宝石"}},
+             "存一个没录过船舱页判据的船种 → 400，并把能选的那一种念出来"),
+            ({"refit": {"enabled": True, "ship": "改良荒木船",
+                        "slots": ["无法搭乘-2行2列"], "cargo_type": "宝石"}},
+             "存一格「无法搭乘」（要花蓝钻）的仓位 → 400"),
+            ({"refit": {"enabled": True, "ship": "改良荒木船", "slots": [], "cargo_type": ""}},
+             "勾了改舱却没填格子也没选类别 → 400（不许留半成品）"),
+        ]:
+            try:
+                appmod.route_preset_save({"name": "方案戊", "stops": [{"stage": "buy", "port": "北京"}],
+                                          "options": badopt})
+                check(label, False)
+            except appmod.HTTPException as e:
+                check(label, e.status_code == 400, f"{e.status_code} {str(e.detail)[:56]}")
+        check("被拒的这几次也没在方案库里留下「方案戊」",
               [x["name"] for x in appmod.route_preset_list()["presets"]] == ["方案甲", "方案乙"],
               str([x["name"] for x in appmod.route_preset_list()["presets"]]))
         dl = appmod.route_preset_delete("方案乙")

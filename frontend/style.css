@@ -468,6 +468,33 @@ body {
 .route-goods-name { color: #a6e3a1; }
 .route-on { color: #a6e3a1; }
 .route-off { color: #f9e2af; }
+/* ---- 第二级（2026-10-01）：这一栏内部再分三块 —— 方案设置 / 购买前改舱 / 切换配置 ----
+   用 div 而不是 button：勾框要长在标签里，<input> 套进 <button> 是非法 HTML，
+   浏览器会把勾框挪到按钮外面，点一次就变两次。 */
+.subtabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 12px 0 2px; }
+.subtab {
+  display: flex; align-items: center; gap: 6px; cursor: pointer;
+  border: 1px solid #45475a; border-radius: 8px 8px 0 0; background: #181825;
+  color: #a6adc8; font-size: 13px; padding: 7px 12px;
+}
+.subtab:hover { background: #1e2030; color: #cdd6f4; }
+.subtab.active { background: #232336; border-color: #89b4fa; color: #89b4fa; font-weight: 600; }
+.subtab input[type=checkbox], .subtab label { cursor: pointer; }
+.subtab-note { color: #6c7086; font-size: 11px; }
+/* 勾框状态直接写在标签上：不用切进那一页就知道这一趟到底做不做这两步 */
+.subtab-state { border-radius: 10px; background: #313244; color: #6c7086; font-size: 11px; padding: 1px 7px; }
+.subtab-state.on { background: #f9e2af; color: #11111b; font-weight: 600; }
+.opt-body { margin-top: 4px; }
+.opt-flag { display: flex; align-items: center; gap: 6px; font-size: 14px; cursor: pointer; margin-bottom: 6px; }
+.opt-state { font-size: 12px; color: #a6adc8; margin-bottom: 8px; }
+.opt-slots {
+  display: flex; flex-direction: column; gap: 4px;
+  border: 1px dashed #45475a; border-radius: 6px; background: #181825;
+  padding: 6px 8px; margin: 8px 0;
+}
+/* 船舱名由类别算出来，只读 —— 和「表格」栏那一列同一个样式（深底绿字） */
+#page-route .field input.opt-cabin { background: #11111b; color: #a6e3a1; }
+.preset-extra { color: #f9e2af; font-size: 11px; word-break: break-all; }
 
 /* ---- 有序站次（2026-09-27：一趟 = 买货→中转→出货，段内按排的先后走） ---- */
 .stops { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }

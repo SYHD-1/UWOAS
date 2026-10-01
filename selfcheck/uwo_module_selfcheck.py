@@ -34,13 +34,13 @@ import sys
 import types
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # 项目根 = selfcheck/ 的上一级（换目录/换机器都不用改）
-FIX = os.path.join(BASE, "selfcheck", "fixtures")   # 自检要用的真图一律钉在这里（T-060）：不读 %TEMP%、不读实跑留下的调试图
 sys.path.insert(0, BASE)
 import cv2  # noqa: E402
 
 import state_machine  # noqa: E402
 from state_machine import StateMachineEngine  # noqa: E402
 
+FIX = os.path.join(BASE, "selfcheck", "fixtures")   # 自检要用的真图一律钉在这里（T-060）：不读 %TEMP%、不读实跑留下的调试图
 TMP = os.environ.get("TEMP", "/tmp")   # 换机器也不用改（和 route_format 那份同款写法）
 SYN = os.path.join(TMP, "uwo_synth_interrupted.png")
 
@@ -57,6 +57,8 @@ class FakeCtl:
     def __init__(self):
         self.clicks = []
         self.keys = []
+        self.addr = "127.0.0.1:16384"
+        self.device_state = "device"
         # 白栏判据的假答案：ensure_input 每轮都会问一次（真实实现走 dumpsys，这里不碰 ADB）。
         # bar_calls 记下问了几次 —— 「每轮都真去认过栏」正是这次修复的核心，不能只靠代码里有一行。
         self.bar = (True, "假：可见位 V / y=806")
@@ -68,6 +70,11 @@ class FakeCtl:
     def send_key(self, code, hold_ms=80):
         self.keys.append(code)
         return True, "fake"
+
+    def _run(self, *args):
+        if args == ("devices",):
+            return types.SimpleNamespace(returncode=0, stdout=f"List of devices attached\n{self.addr}\t{self.device_state}\n", stderr="")
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
 
     def input_text(self, text):
         self.clicks.append(("input", text))
@@ -812,7 +819,7 @@ check("卖货链没有 goto 到别的模块（这里干脆一条 goto 都不用�
       sg <= sells, str(sg))
 
 print("=" * 72)
-print("15) 卖货收尾：结算窗那一步 = 点确定 → 清账 → 收尾分流；没看到窗就不清账")
+print("15) 卖货收尾：结算窗那一步 = 点确定 → 清账 → 退回港口 → 收尾分流；没看到窗就不清账")
 tail = [a for a in by_id["sell_add_all"]["actions"] if a.get("type") == "if"]
 settle = next((a for a in tail if (a.get("condition") or {}).get("name") == "UI-结算结果-标题"), None)
 check("最后有一个「看到结算结果窗才动手」的分支（锚点判据，不是全图找金色确定）",
@@ -820,12 +827,17 @@ check("最后有一个「看到结算结果窗才动手」的分支（锚点判�
 then = settle.get("then") or []
 els = settle.get("else") or []
 flags_in_then = [a for a in then if a.get("type") == "set_flag"]
-check("这一支按顺序是：锚点定窗+窗内匹配确定 → 待卖账置 0 → 分流收尾（trip_next）",
-      [a.get("type") for a in then] == ["click_after_template", "set_flag", "trip_next"],
+check("这一支按顺序是：锚点定窗+窗内匹配确定 → 待卖账置 0 → 退回港口 → 分流收尾（trip_next）",
+      [a.get("type") for a in then] == ["click_after_template", "set_flag", "exit_to_port", "trip_next"],
       str([a.get("type") for a in then]))
-check("清完账之后单模块照旧停止（文字里还得是那句「卖货这一趟结束」）",
-      then[-1].get("after") == "work" and "卖货这一趟结束" in (then[-1].get("reason") or ""),
-      str(then[-1])[:120])
+exit_act = next((a for a in then if a.get("type") == "exit_to_port"), None)
+check("卖货完成后必须退回港口再接买货（否则下一段读不到港口名）",
+      exit_act and exit_act.get("port_marker") == "UI-港口标志"
+      and int(exit_act.get("max_clicks", 0)) >= 1
+      and int(exit_act.get("timeout_seconds", 0)) > 0, str(exit_act))
+check("清完账、退回港口之后单模块照旧停止（文字里还得是那句「卖货这一趟结束」）",
+      then[-1].get("after") == "work" and "卖货这一趟结束" in (then[-1].get("reason") or "")
+      and "退回港口" in (then[-1].get("reason") or ""), str(then[-1])[:120])
 check("置的是 sell_pending=0（不是 1）",
       len(flags_in_then) == 1 and flags_in_then[0].get("name") == "sell_pending"
       and flags_in_then[0].get("value") is False, str(flags_in_then))
@@ -983,6 +995,57 @@ try:
     check("委托交易品那扇窗的「一键添加」不能被误当成「全部添加」", False, str(ctl.clicks))
 except ValueError as err:
     check("委托交易品窗不会误点（实测 0.6408 < 0.9）", True, str(err))
+
+PORT_SHOT = os.path.join(SELL_DIR, "01_port.png")
+
+
+def click_points(ctl):
+    return [c for c in ctl.clicks
+            if isinstance(c, tuple) and len(c) == 2 and all(isinstance(v, int) for v in c)]
+
+
+def snap_sequence(*shots):
+    seq = list(shots)
+
+    def fake_snap(_ctl, path, what="截图"):
+        src = seq.pop(0) if seq else shots[-1]
+        shutil.copyfile(src, path)
+        return True, "fake"
+    return fake_snap
+
+
+# 卖货完成后必须退回港口：真出售页右上角有房子，点完之后拿真港口图确认灯塔标志。
+eng, ctl = make_engine(SELL_TAB)
+eng._snap = snap_sequence(SELL_TAB, PORT_SHOT)
+r = eng._do_action({"type": "exit_to_port", "max_clicks": 3, "wait_ms": 0,
+                    "port_marker": "UI-港口标志"}, ctl, SELL_TAB)
+check("exit_to_port：出售页点一次房子，下一帧确认回到港口",
+      len(click_points(ctl)) == 1 and "已确认 UI-港口标志" in r, str((click_points(ctl), r)))
+check("exit_to_port 成功不置停止位（后面才允许 trip_next 接买货）",
+      eng._stop_event.is_set() is False and eng._alert_request is None)
+# 已经在港口时不该盲点右上角：那块是菜单 ≡，盲点会把菜单打开。
+eng, ctl = make_engine(PORT_SHOT)
+eng._snap = snap_sequence(PORT_SHOT)
+r = eng._do_action({"type": "exit_to_port", "max_clicks": 3, "wait_ms": 0,
+                    "port_marker": "UI-港口标志"}, ctl, PORT_SHOT)
+check("exit_to_port：已经在港口就不点右上角（不把菜单打开）",
+      click_points(ctl) == [] and "已确认 UI-港口标志" in r, str((click_points(ctl), r)))
+# 点了房子但画面一直没退回港口：必须停下，不许 trip_next 继续把买货接到交易所画面上。
+eng, ctl = make_engine(SELL_TAB)
+eng._snap = snap_sequence(SELL_TAB, SELL_TAB, SELL_TAB)
+r = eng._do_action({"type": "exit_to_port", "max_clicks": 2, "wait_ms": 0,
+                    "port_marker": "UI-港口标志"}, ctl, SELL_TAB)
+check("exit_to_port：点满还没看到港口标志 -> 停止喊人，不继续接下一段",
+      len(click_points(ctl)) == 2 and eng._stop_event.is_set()
+      and eng.stop_kind == "alert" and eng._alert_request is not None, str((click_points(ctl), r)))
+# ADB 不可用时同样停下，不靠后面的入口检测兜底。
+eng, ctl = make_engine(SELL_TAB)
+ctl.device_state = "offline"
+r = eng._do_action({"type": "exit_to_port", "max_clicks": 1, "wait_ms": 0,
+                    "port_marker": "UI-港口标志"}, ctl, SELL_TAB)
+check("exit_to_port：ADB 不可用时停下，不点也不接买货",
+      click_points(ctl) == [] and eng._stop_event.is_set() and "ADB" in (eng.stop_reason or ""),
+      str((click_points(ctl), eng.stop_reason)))
 
 # 链头那张 all 条件：拿真到港画面 + 临时账本跑一遍（绝不碰项目里的 run_state.json）
 TMP_FLAGS = os.path.join(TMP, "uwo_module_selfcheck_run_state.json")
@@ -1626,9 +1689,11 @@ check("这一格还是靠 next 串到 voyage（没塞 goto，模块边界不破�
       and not any(a.get("type") == "goto" for a in wa), str(wired.get("next")))
 # 界面得认这两种新动作，不然调试台里这一格只能看不能改（保存时会被当成未知类型）
 js = open(os.path.join(BASE, "frontend", "app.js"), encoding="utf-8").read()
-check("前端 ACTION_TYPES 认这两种动作（列表里一处 + 默认参数两处）",
+check("前端 ACTION_TYPES 认地图搜港两种动作（列表里一处 + 默认参数两处）",
       js.count("ensure_input") >= 2 and js.count("confirm_city_move") >= 2,
       f"{js.count('ensure_input')}/{js.count('confirm_city_move')}")
+check("前端 ACTION_TYPES 认 exit_to_port（卖货收尾要能在调试台保存/编辑）",
+      js.count("exit_to_port") >= 3, str(js.count("exit_to_port")))
 check("前端不许在状态里裸用 input 而丢掉验字（老的 input 编辑项还在，但注明了只适合手动单步）",
       "手动单步" in js)
 

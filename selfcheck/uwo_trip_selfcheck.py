@@ -800,6 +800,151 @@ if m_mg:
     if os.path.exists(hj):
         os.remove(hj)
 
+print("=" * 72)
+print("I) 前端第二级：跑商设置栏内分「方案设置 / 购买前改舱 / 切换配置」")
+import route_presets as rps  # noqa: E402  (界面上能选谁，必须和后端肯存谁一模一样)
+
+# 后面有好几条断言要比对「去掉强调标签和书名号之后的界面原话」—— 那些标记只是排版用的，
+# 词本身是产品对用户说的话，断言按整句写才不会一改文案就假失败。
+plain = html.replace("<b>", "").replace("</b>", "").replace("「", "").replace("」", "")
+
+
+def js_list(name):
+    """把 app.js 里那行 `const X = ["…", "…"];` 读成 python 列表（读不出来给 None，让断言当场报）。"""
+    m = re.search(r"const %s = \[([^\]]*)\];" % name, js)
+    if not m:
+        return None
+    return [s.strip().strip('"') for s in m.group(1).split(",") if s.strip()]
+
+
+check("二级那一排存在：三块面板 + 三个 data-rtab（方案设置 / refit / cfg）",
+      'id="route-subtabs"' in html and html.count('data-rtab=') == 3
+      and 'data-rtab="plan"' in html and 'data-rtab="refit"' in html and 'data-rtab="cfg"' in html
+      and 'id="route-sub-plan"' in html and 'id="route-sub-refit"' in html
+      and 'id="route-sub-cfg"' in html,
+      str(re.findall(r'data-rtab="(\w+)"', html)))
+check("二级用的是 div 不是 button：<input> 套进 <button> 是非法 HTML，点一次会变两次",
+      '<div class="subtab' in html and '<button class="subtab' not in html)
+check("原来那一整套内容整块搬进「方案设置」，一个字没删（方案库卡片 + 站次三张卡 + datalist 都在里面）",
+      html.index('<div id="route-sub-plan" hidden>') < html.index('id="preset-list"')
+      and html.index('<div id="route-sub-plan" hidden>') < html.index('id="route-stops-sell"')
+      and html.index('<div id="route-sub-plan" hidden>') < html.index('id="route-port-options"')
+      and html.index('id="route-port-options"') < html.index("</div><!-- /route-sub-plan -->"),
+      "顺序对不上")
+# 2026-10-01 你又拍了一条：进栏时**三块都收起**，点哪一个才展开哪一个（默认谁都不摊开）
+check("三块面板默认**全部收起**（方案设置也不抢那个「一进来就摊开」的位置）",
+      'id="route-sub-plan" hidden' in html and 'id="route-sub-refit" hidden' in html
+      and 'id="route-sub-cfg" hidden' in html,
+      str([i for i in ["plan", "refit", "cfg"] if 'id="route-sub-%s" hidden' % i not in html]))
+check("html 里没有任何一个二级标签写着默认高亮（active 只能由点击产生）",
+      '<div class="subtab active"' not in html,
+      str(re.findall(r'<div class="subtab[^"]*"', html))[:120])
+check("进栏走 switchRouteTab(null) = 三块都收起；旧的「记住上次开的是哪块」已经删掉"
+      "（记了就会自己弹开一块，正好和你要的相反）",
+      "switchRouteTab(null);" in js_fn("loadPresetEditor")
+      and "uwo.routeTab" not in js and "routeTab = null" in js,
+      js_fn("loadPresetEditor").strip().replace("\n", " ")[-90:])
+check("点左侧导航进这一栏时**先当场收起**再去拉数据（不然上一块会摊着两百毫秒，像没收）",
+      'if (page === "route") {' in js_fn("switchPage")
+      and js_fn("switchPage").index("switchRouteTab(null);")
+          < js_fn("switchPage").index("loadPresetEditor();"),
+      js_fn("switchPage")[-200:].replace("\n", " "))
+check("switchRouteTab 认 null（收起全部），非 null 才高亮那一块",
+      "if (tab !== null && !ROUTE_TABS.includes(tab))" in js_fn("switchRouteTab")
+      and 'b.dataset.rtab === tab' in js_fn("switchRouteTab")
+      and "el.hidden = k !== tab" in js_fn("switchRouteTab"),
+      js_fn("switchRouteTab").strip().replace("\n", " ")[:110])
+check("点「编辑」/「另存为新方案」会顺手展开方案设置（收起着点它俩会像没反应）",
+      'switchRouteTab("plan");' in js_fn("presetEditByIdx")
+      and 'switchRouteTab("plan");' in js_fn("presetSaveAsNew"),
+      "presetEditByIdx / presetSaveAsNew 里没找到展开调用")
+check("界面上把「三块默认收起、点哪一个展开哪一个」写出来了（不能让人自己猜）",
+      "默认都是收起的" in plain and "点上面哪一个" in plain, "")
+check("两个带勾框的项：勾框直接长在二级标签上，勾与不勾不用点进去就看得见",
+      'id="flag-refit"' in html and 'id="flag-cfg"' in html
+      and 'id="flag-refit-state"' in html and 'id="flag-cfg-state"' in html)
+check("标签上的勾框和面板里的勾框写的是同一份草稿（四个都走 onOptionFlag，没有第二套状态）",
+      html.count('onchange="onOptionFlag(') == 2
+      and js.count('onchange="onOptionFlag(') == 2
+      and js_fn("onOptionFlag").count("enabled") >= 1,
+      "html %d / js %d" % (html.count('onchange="onOptionFlag('), js.count('onchange="onOptionFlag(')))
+check("切换面板只换这一栏内部的三块，左侧一级导航一个字不动（没多出一个 data-page）",
+      'data-page="refit"' not in html and 'data-page="cfg"' not in html
+      and "route-sub-plan" in js_fn("switchRouteTab") and "PAGES" not in js_fn("switchRouteTab"),
+      js_fn("switchRouteTab").strip().replace("\n", " ")[:120])
+# 改舱那一页：参数是真的（船种 / 哪几格 / 改成什么舱），且和后端同一份清单
+check("改舱那一页给三个真参数：船种下拉、格子勾框、类别下拉 + 只读船舱名",
+      'id="refit-ship"' in js_fn("renderRefitBody")
+      and 'id="refit-cargo"' in js_fn("renderRefitBody")
+      and "data-slot=" in js_fn("renderRefitBody")
+      and 'class="opt-cabin"' in js_fn("renderRefitBody"),
+      js_fn("renderRefitBody").strip().replace("\n", " ")[:120])
+check("船舱名按 大型XX管理室 现算（和表格栏 / purchase_plan.cabin_name 同一条规则，不另存一份）",
+      "`大型${o.cargo_type}管理室`" in js_fn("renderRefitBody"))
+check("界面上能选的船种 == 后端肯存的船种（一边多一个名字就会出现「选了存不进」）",
+      js_list("REFIT_SHIPS") == rps.REFIT_SHIPS, str(js_list("REFIT_SHIPS")))
+check("界面上能勾的格子 == 后端肯存的格子，而且全是「可搭乘」（花蓝钻的那一栏根本不在候选里）",
+      js_list("REFIT_SLOTS") == rps.REFIT_SLOTS
+      and not any("无法搭乘" in s for s in (js_list("REFIT_SLOTS") or [])),
+      str(js_list("REFIT_SLOTS")))
+check("类别下拉的候选从 /api/plan 取（那 17 种只有表格栏一份，不在前端抄写一遍）",
+      "routeCargoTypes = Array.isArray(plan.cargo_types)" in js_fn("loadPresetEditor"))
+check("没录判据的船种在界面上是**勾不上的占位项**（disabled，不是能选但存不进的选项）",
+      '<option value="" disabled>（占位' in js_fn("renderRefitBody"))
+# 切换配置那一页：只有个勾，没有任何参数能落盘
+check("切换配置那一页是占位符：只有一个勾 + 一个禁用的输入框，界面上就写着占位",
+      "disabled" in js_fn("renderCfgBody") and "占位" in js_fn("renderCfgBody")
+      and "route-warn-item" in js_fn("renderCfgBody"))
+check("切换配置交出去的只有开关（配置名根本没地方存，后端也不认第二个项目）",
+      "switch_config: { enabled: c.enabled === true }" in js_fn("pickOptions")
+      and "config_name" not in js and "configName" not in js,
+      js_fn("pickOptions").strip().replace("\n", " ")[-90:])
+check("界面把「这两步引擎还不做」写在栏口那句说明上，不是藏在某一页里",
+      "引擎里没有对应动作" in plain and "只是记在方案里" in plain
+      and html.index("引擎里没有对应动作") < html.index('<div class="subtabs"'),
+      "那句说明得排在二级标签之前，切到哪一块都看得见")
+check("蓝钻那条规矩在界面上说得出（改舱只碰金币那一栏），并且写了实测那次的单价",
+      "蓝色钻石" in html and "5,943,000" in html)
+check("切换配置为什么还没参数写在界面上（LV25「分配」没实测 / T-008）",
+      "LV25" in html and "T-008" in html)
+check("这一项以前的「别加」决定和今天的口径都留在界面上（免得以后又当成漏做的重新讨论）",
+      "先搁置" in html and "2026-10-01" in html)
+# 数据线：勾了要存得进去、脏检查要管得到、老方案要读得动
+check("保存方案真的把 options 交出去（不然这一页白填）",
+      "options: core.options" in js_fn("saveRoute"))
+check("「有改动未保存」的比对覆盖 options（勾框一改就提醒，切走会拦住问一句）",
+      "options: pickOptions(preset.options)" in js_fn("coreOf"))
+check("读回来的勾框认的是 === true（老方案里没这一项 = 没勾，绝不当成勾上了）",
+      js_fn("pickOptions").count("=== true") == 2, str(js_fn("pickOptions").count("=== true")))
+check("格子按固定顺序存（不是点击顺序），后端同一条规矩 —— 两边存出来必须一模一样",
+      "o.refit.slots = REFIT_SLOTS.filter(s => set.has(s))" in js_fn("onRefitSlot")
+      and "[s for s in REFIT_SLOTS if s in slots]" in open(
+          os.path.join(BASE, "route_presets.py"), encoding="utf-8").read())
+check("每次重画这两块面板都排队到下一个任务（勾框自己在自己那块里，同步换掉会一点一删）",
+      "setTimeout(() => { renderRouteOptions()" in js_fn("refreshRouteOptions"))
+check("站次那头的每一处改动都顺手刷这两块（「这一趟要跑哪几类货」那一行不会停在旧的）",
+      js.count("refreshRouteOptions()") >= 6, "出现 %d 次" % js.count("refreshRouteOptions()"))
+check("整片刷新走 renderRoute → renderRouteOptions：换方案时站次和勾框一起换，不会半新半旧",
+      "renderRouteOptions();" in js_fn("renderRoute")
+      and "renderRoute();" in js_fn("loadPresetEditor"),
+      js_fn("renderRoute").strip().replace("\n", " ")[:100])
+check("方案列表那一行念得出勾了什么（options_text 由后端算，前端不自己拼第二套话）",
+      "p.options_text" in js_fn("renderPresets") and "out.preset.options_text" in js_fn("saveRoute"))
+check("样式齐了：二级标签 / 勾框状态徽 / 只读船舱名 / 列表那一行的附加步骤",
+      all(s in css for s in [".subtabs {", ".subtab.active", ".subtab-state.on",
+                             "input.opt-cabin", ".preset-extra"]),
+      str([s for s in [".subtabs {", ".subtab.active", ".subtab-state.on",
+                       "input.opt-cabin", ".preset-extra"] if s not in css]))
+check("勾了改舱却没填格子/类别时界面上有黄字提醒（后端会拒，先在界面上说明白）",
+      "还得说清" in js_fn("renderRefitBody")
+      and "改完退不回去" in js_fn("renderRefitBody")
+      and "o.enabled && miss.length" in js_fn("renderRefitBody")
+      and "route-warn-item" in js_fn("renderRefitBody")
+      and len(re.findall(r"miss\.push", js_fn("renderRefitBody"))) == 2,
+      js_fn("renderRefitBody").count("route-warn-item"))
+check("界面上不写死船舱判据模板名以外的东西：格子的模板名按 UI-船舱-可搭乘-格序拼（命名口径统一）",
+      "`UI-船舱-可搭乘-${s}-…`" in js_fn("renderRefitBody"))
+
 if os.path.exists(FLAGFILE):
     os.remove(FLAGFILE)
 state_machine.purchase_plan = real_plan

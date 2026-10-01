@@ -606,10 +606,17 @@
               "value": false
             },
             {
+              "type": "exit_to_port",
+              "max_clicks": 3,
+              "wait_ms": 1200,
+              "port_marker": "UI-港口标志",
+              "timeout_seconds": 20
+            },
+            {
               "type": "trip_next",
               "after": "work",
-              "reason": "已卖出并关掉结算窗，待卖账清零，卖货这一趟结束",
-              "done_reason": "整趟走完：货已卖出、待卖账已清零"
+              "reason": "已卖出并关掉结算窗、待卖账清零、退回港口，卖货这一趟结束",
+              "done_reason": "整趟走完：货已卖出、待卖账已清零、已退回港口"
             }
           ],
           "else": [

@@ -1042,6 +1042,81 @@ class StateMachineEngine:
             self._log("warn",
                       f"未能确认在港口界面（{port_marker} 未命中），仍继续启动")
 
+    def _do_exit_to_port_action(self, action, ctl, screen_path):
+        """动作版退回港口界面：只在某条链收尾时调用，退不回就停止喊人。
+
+        启动前的 _exit_to_port 是「尽量退一下，不拦启动」；这里相反：卖货结算后如果还停在交易所，
+        下一段买货/读港口名会从错误画面起步，所以必须确认港口标志再交给 trip_next。
+        """
+        cfg = self.config.get("exit_to_port") or {}
+        names = action.get("buttons") or cfg.get("buttons") or []
+        if not names:
+            raise ValueError("exit_to_port 必须给 buttons，或在 config.exit_to_port.buttons 里配置退出图标")
+        max_clicks = max(int(action.get("max_clicks", cfg.get("max_clicks", 5))), 1)
+        wait = max(int(action.get("wait_ms", cfg.get("wait_ms", 1200))), 0) / 1000
+        port_marker = action.get("port_marker", cfg.get("port_marker", "UI-港口标志"))
+        screen = self._cap_path("exit_action")
+        clicks = 0
+
+        def confirm_port(label):
+            if not port_marker:
+                return True, f"{label}；未配置港口确认模板，本次共点退出 {clicks} 次"
+            m_path, m_roi, m_thr = self._resolve_template(port_marker)
+            if not m_path:
+                raise ValueError(f"港口确认模板不存在: {port_marker}")
+            try:
+                res = find_template(screen, m_path, roi=m_roi, threshold=m_thr)
+            except Exception as e:
+                raise ValueError(f"港口确认匹配异常: {type(e).__name__}: {e}")
+            if res:
+                return True, f"{label}；已确认 {port_marker} 置信度{res['confidence']}，本次共点退出 {clicks} 次"
+            return False, f"{label}；没看到 {port_marker}"
+
+        for attempt in range(1, max_clicks + 1):
+            if self._stop_event.is_set():
+                return f"已停止，退出港口动作停在第 {attempt} 轮之前"
+            if self._device_state(ctl) != "device":
+                return self._stop_for_human(
+                    "UWO 已停止：卖货后退不回港口",
+                    "ADB 设备不可用，没法点击右上角房子退出交易所",
+                    "卖货已经走到收尾；继续接买货会从交易所页面读港口名，必然读不到。")
+            ok, info = self._snap(ctl, screen, "退出港口动作截图")
+            if not ok:
+                return self._stop_for_human(
+                    "UWO 已停止：卖货后退不回港口",
+                    f"截图失败：{info}",
+                    "卖货已经走到收尾；继续接买货会从旧画面起步，所以先停下等人看模拟器。")
+
+            hit = self._match_exit_button(screen, names)
+            if not hit:
+                ok, msg = confirm_port("右上角没看到房子/X，按『可能已经在港口』核对")
+                if ok:
+                    return msg
+                return self._stop_for_human(
+                    "UWO 已停止：卖货后退不回港口",
+                    "右上角没看到房子/X，也没看到港口标志",
+                    f"最后画面：{msg}。继续接买货会读不到港口名，所以没有执行后面的 trip_next。")
+
+            px, py, note = self._tap(ctl, hit)
+            clicks += 1
+            self._log("exit_port",
+                      f"卖货收尾第 {attempt}/{max_clicks} 轮：匹配到『{hit['name']}』"
+                      f"{note} 置信度{hit['confidence']}，点击退出")
+            self._sleep_interruptible(wait)
+
+        ok, info = self._snap(ctl, screen, "退出港口最终确认截图")
+        if ok:
+            ok2, msg = confirm_port(f"已点退出 {clicks} 次")
+            if ok2:
+                return msg
+            detail = msg
+        else:
+            detail = f"最终确认截图失败：{info}"
+        return self._stop_for_human(
+            "UWO 已停止：卖货后退不回港口",
+            f"点了 {clicks} 次退出，仍不能确认已经回到港口界面",
+            f"{detail}。继续接买货会从错误画面读港口名，所以没有执行后面的 trip_next。")
+
     # ---------- 入口检测 ----------
     def _detect_entry(self, ctl):
         """启动时按 states 顺序检测本模块所有 entry:true 的状态，第一个匹配的作为起点。
@@ -1585,6 +1660,9 @@ class StateMachineEngine:
 
         if t == "confirm_city_move":
             return self._do_confirm_city_move(action, ctl, screen_path)
+
+        if t == "exit_to_port":
+            return self._do_exit_to_port_action(action, ctl, screen_path)
 
         if t == "goto":
             return self._do_goto(action)

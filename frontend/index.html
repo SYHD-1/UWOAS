@@ -329,6 +329,33 @@
           <button class="btn" onclick="presetSaveAsNew()">另存为新方案</button>
           <span id="route-status" class="info"></span>
         </div>
+        <!-- 第二级（2026-10-01 你要的）：这一栏分成「方案设置」+ 两个带勾框的附加步骤。
+             站次那套原有内容整块搬进「方案设置」，一点没删；勾框点进去就是它的参数页。
+             同一天你补的口径：**进栏时三块都收起，点哪一个才展开哪一个**（默认谁都不摊开）。 -->
+        <p class="hint">
+          这一栏分<b>三块</b>：<b>方案设置</b>（原来那一整套：站次 + 每站勾什么货）、
+          <b>购买前改舱</b>、<b>切换配置</b>。后两块是<b>买货之前先做的两件事</b>，
+          各自有个勾 —— <b>勾上才算要做</b>，点开这一页就能配参数。<br>
+          <b>三块默认都是收起的</b>：点上面哪一个，才展开哪一个（和「表格」栏一样的点法）。<br>
+          说清楚一句：<b>这两步现在还只是「记在方案里」</b> —— 引擎里没有对应动作，
+          点启动不会去造船所、也不会换船队配置（原因写在各自那一页上）。
+        </p>
+        <div class="subtabs" id="route-subtabs">
+          <div class="subtab" data-rtab="plan" onclick="switchRouteTab('plan')">
+            方案设置<span class="subtab-note">站次 · 每站勾货</span></div>
+          <div class="subtab" data-rtab="refit" onclick="switchRouteTab('refit')">
+            <input type="checkbox" id="flag-refit"
+                   onchange="onOptionFlag('refit', this.checked)">
+            <label for="flag-refit">购买前改舱</label>
+            <span class="subtab-state" id="flag-refit-state">不改</span></div>
+          <div class="subtab" data-rtab="cfg" onclick="switchRouteTab('cfg')">
+            <input type="checkbox" id="flag-cfg"
+                   onchange="onOptionFlag('switch_config', this.checked)">
+            <label for="flag-cfg">切换配置</label>
+            <span class="subtab-state" id="flag-cfg-state">占位</span></div>
+        </div>
+
+        <div id="route-sub-plan" hidden>
         <p class="hint">
           这一栏<b>只编方案</b>。方案一律是<b>一整套完整流程</b>：买货（可以多个）→ 中转（可以多个）→ 最后<b>一个</b>出货港，
           不再分「本次跑哪个模块」那种单模块方案。<br>
@@ -417,6 +444,59 @@
         </div>
 
         <datalist id="route-port-options"></datalist>
+        </div><!-- /route-sub-plan -->
+
+        <!-- 二级 ②：购买前改舱（跑商流程.txt 第 3 步）。参数是真的、存进方案，引擎那一步还没接。 -->
+        <div id="route-sub-refit" hidden>
+          <section class="route-card">
+            <h3><span class="route-step">⚒</span>购买前改舱 · 造船所「变更船舱」
+              <span class="tag tag-global">存进方案，引擎暂时不读</span></h3>
+            <div id="refit-body" class="opt-body">（还没读取）</div>
+            <p class="hint">
+              这一步是<b>到交易所买货之前</b>去造船所把货舱改成要跑的那类货（增加购买量）：
+              数字键 2 进造船所 → 设计图 → 改良东方 → <b>改良荒木船</b> → 底部「变更船舱」。
+              2026-09-23 在 <b>LV80·北京</b> 号上实测走通过这条点击链。
+            </p>
+            <p class="hint">
+              <b>为什么只有「改良荒木船」能选</b>：船舱页那三张判据模板
+              （<i>UI-船舱-可搭乘-1行2列 / 1行3列 / 3行3列</i>）就是照着这一种船录的，
+              别的船种一张都没录 —— 存一个没判据的船种，将来那一步会去点一个它不认识的画面。
+              <b>为什么只给「可搭乘船舱」那三格</b>：只有这一栏以「管理室」结尾的仓位花<b>金币</b>，
+              「无法搭乘」栏那些以「仓库」结尾的要花<b>蓝色钻石</b>（2026-09-23 你为节约账号资源明确要求不碰）。
+            </p>
+            <p class="hint">
+              <b>花的是真金币、不可逆</b>：2026-09-23 实机那三次每格 5,943,000 金币（共 17,829,000），
+              实际花费以游戏里那扇弹窗底部的价格条为准。
+              引擎那一步还<b>没编成状态</b>（待办 T-002），卡在「怎么知道底部价格条是金币还是蓝钻」
+              那张角标模板（T-003，要你在游戏里框选截图）—— 判据没齐之前，这里只是<b>把要改什么记下来</b>。
+            </p>
+          </section>
+        </div><!-- /route-sub-refit -->
+
+        <!-- 二级 ③：切换配置（跑商流程.txt 第 2 步）—— 整块是占位符，只有个勾。 -->
+        <div id="route-sub-cfg" hidden>
+          <section class="route-card">
+            <h3><span class="route-step">⚙</span>切换配置 · 菜单-配置-更换船队配置
+              <span class="tag tag-global">占位符 · 只有个勾</span></h3>
+            <div id="cfg-body" class="opt-body">（还没读取）</div>
+            <p class="hint">
+              <b>这一整块是占位符</b>：想要它做的事是「买货前把船队配置换成买货量增加的那一档」
+              （<i>跑商流程.txt</i> 第 2 步：菜单 → 配置 → 更换 → 退出）。
+              <b>游戏里那扇界面还没实测过</b> —— 「分配」按钮要 <b>LV25</b> 才亮，
+              当前号 LV80 按等级早该解锁，但没人进船队界面看过一眼（待办 T-008）。
+              没有判据（怎么认出「现在挂的是哪一档」「换成功没有」）就没有参数可配，
+              所以现在<b>只留一个勾</b>：把「这一趟要换配置」这件事记在方案里，
+              等你实测那一屏、录好模板，再回来这里加参数。
+            </p>
+            <p class="hint">
+              <b>为什么这里没有配置名输入框、也没有下拉候选</b>：那几档配置叫什么名字、
+              画面上长什么样，一个字都没记过。写一个填了也没人读、也没法校验的框，
+              比不写更坏 —— 会让人以为已经配好了。<br>
+              这一项 2026-09-30 拍过「先搁置、界面里别加」，2026-10-01 你改成「先做成占位符」，
+              现在按后者：勾能勾、话说明白、<b>引擎一个字都不做</b>。
+            </p>
+          </section>
+        </div><!-- /route-sub-cfg -->
       </section>
 
       <!-- ---------- 栏 7：设置（引擎参数 + 设备与环境） ---------- -->
