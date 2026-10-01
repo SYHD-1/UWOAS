@@ -108,7 +108,7 @@
     ],
     "preprocess": {
       "scale": 2,
-      "binary_method": "otsu"
+      "binary_method": null
     }
   }
 ]

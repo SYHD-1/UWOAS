@@ -1028,6 +1028,12 @@ bm = lambda n: (by_name.get(n, {}).get("preprocess") or {}).get("binary_method")
 check("『港口名字』是 otsu（改回 null 就等于把两条链的链头关掉）", bm("港口名字") == "otsu", repr(bm("港口名字")))
 for other in ["协商按钮区", "购买出售标签", "右侧面板标题", "商品列表", "补货倒计时"]:
     check(f"{other} 没被顺手一起改（那些判据是在不二值化下验的）", bm(other) is None, repr(bm(other)))
+# 2026-10-01 学到的一课（别再写回 otsu）：这块是「国旗图标 + 城市名」彩图混排，不是纯文字。
+# otsu 的全局阈值会把国旗压成一个黑白团、和右边的字粘连，实测把『汉堡』读成『二汊堡』（conf 0.04），
+# 而 confirm_city_move 的判据是「读到的串里要有本次港名」—— 有『汊』没『汉』就判成对不上、停止喊人。
+# 关掉二值化只留 CLAHE，EasyOCR 自己把国旗当图形跳过，读『汉堡』conf 0.92（同一帧实测）。
+check("『地图选中城市』保持不二值化（彩图混排用 otsu 会把国旗糊进字里）",
+      bm("地图选中城市") is None, repr(bm("地图选中城市")))
 HAMBURG_PORT = os.path.join(SELL_DIR, "01_port.png")
 check("卖货录制·汉堡港内：找『汉堡』命中（改之前这里读到「汊堡」= False）",
       ocr_find_in_region(HAMBURG_PORT, "汉堡", "港口名字")["found"],
