@@ -43,12 +43,102 @@
       "modules": [
         "buy",
         "sail",
-        "sell"
+        "sell",
+        "switch_config"
       ],
       "max_rounds": 400
     }
   },
   "states": [
+    {
+      "id": "switch_config_open_menu",
+      "name": "更改配置：点击右上角三横线打开菜单",
+      "module": "switch_config",
+      "entry": true,
+      "condition": {
+        "type": "template",
+        "name": "图标-菜单-三横线",
+        "threshold": 0.85
+      },
+      "actions": [
+        {
+          "type": "click_template",
+          "name": "图标-菜单-三横线",
+          "threshold": 0.85
+        },
+        {
+          "type": "wait",
+          "ms": 2000
+        }
+      ],
+      "next": "switch_config_open_assign"
+    },
+    {
+      "id": "switch_config_open_assign",
+      "name": "更改配置：在菜单右半屏寻找并点击分配图标",
+      "module": "switch_config",
+      "condition": {
+        "type": "template",
+        "name": "图标-菜单-分配",
+        "threshold": 0.85
+      },
+      "actions": [
+        {
+          "type": "click_template",
+          "name": "图标-菜单-分配",
+          "threshold": 0.85
+        },
+        {
+          "type": "wait",
+          "ms": 2000
+        }
+      ],
+      "next": "switch_config_choose"
+    },
+    {
+      "id": "switch_config_choose",
+      "name": "更改配置：滚动识别自定义配置名，点行 → 应用 → 确定 → 点小房子退回港口",
+      "module": "switch_config",
+      "condition": {
+        "type": "ocr",
+        "region": "分配设置标题",
+        "contains": "分配设置"
+      },
+      "actions": [
+        {
+          "type": "switch_config_select",
+          "region": "分配配置列表",
+          "swipe_range": [
+            202,
+            720,
+            202,
+            300
+          ],
+          "max_swipes": 6,
+          "max_swipes_up": 6,
+          "swipe_pause_ms": 800,
+          "swipe_duration": 300,
+          "click_x": 202,
+          "select_wait_ms": 800,
+          "apply_template": "UI-分配设置-应用",
+          "apply_wait_ms": 1500,
+          "confirm_template": "UI-分配设置-确定",
+          "confirm_wait_ms": 1000,
+          "timeout_seconds": 180
+        },
+        {
+          "type": "exit_to_port",
+          "max_clicks": 3,
+          "wait_ms": 1200,
+          "port_marker": "UI-港口标志",
+          "timeout_seconds": 20
+        },
+        {
+          "type": "switch_config_resume"
+        }
+      ],
+      "next": null
+    },
     {
       "id": "in_port",
       "name": "在港口界面核对港口名后按3进交易所",

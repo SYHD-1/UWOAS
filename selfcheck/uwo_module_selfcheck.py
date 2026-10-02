@@ -26,6 +26,7 @@
  22 ensure_input：点框 → 认栏 → 打字 → OCR 读回核对，不通就重来（重试环）
  23 confirm_city_move：先核对选中的城市 = 本次港口，再等按钮真出现才点
  24 接线：sail_pick_city 的走位、两块新 OCR 区域、前端认这两种新动作
+ 25 更改配置前两步：三横线固定槽位 + 右半屏找分配图标 + 独立模块启动路径
 """
 import json
 import os
@@ -1696,6 +1697,306 @@ check("前端 ACTION_TYPES 认 exit_to_port（卖货收尾要能在调试台保�
       js.count("exit_to_port") >= 3, str(js.count("exit_to_port")))
 check("前端不许在状态里裸用 input 而丢掉验字（老的 input 编辑项还在，但注明了只适合手动单步）",
       "手动单步" in js)
+
+print("=" * 72)
+print("25) 更改配置完整链：开菜单 → 点分配 → 按名称选择并应用 → 回原链")
+CFG_PORT = os.path.join(FIX, "state_screen_exit.png")
+CFG_MENU = os.path.join(FIX, "uwo_config_menu.png")
+CFG_APPLY = os.path.join(FIX, "uwo_config_apply.png")   # 分配设置页真图：已选中一行，右下角有金色「应用」
+tpl_entries = {t["name"]: t for t in json.load(open(os.path.join(BASE, "templates.json"), encoding="utf-8"))}
+hamburger = tpl_entries.get("图标-菜单-三横线") or {}
+assign = tpl_entries.get("图标-菜单-分配") or {}
+check("三横线模板仍只看右上角互斥槽位 [1500,6,86,70]",
+      hamburger.get("roi") == [1500, 6, 86, 70], str(hamburger.get("roi")))
+check("分配图标按你的要求在屏幕右半区域搜索，不绑菜单排序",
+      assign.get("roi") == [800, 0, 800, 900], str(assign.get("roi")))
+check("两张模板图片都存在",
+      all(t.get("image") and os.path.exists(os.path.join(BASE, t["image"]))
+          for t in (hamburger, assign)), str([t.get("image") for t in (hamburger, assign)]))
+hit_menu = find_template(CFG_PORT, os.path.join(BASE, hamburger["image"]),
+                         roi=hamburger["roi"], threshold=hamburger["threshold"])
+hit_assign = find_template(CFG_MENU, os.path.join(BASE, assign["image"]),
+                           roi=assign["roi"], threshold=assign["threshold"])
+check("港口真图能认出三横线，而且落点在右上角槽位内",
+      hit_menu and 1500 <= hit_menu["cx"] <= 1586 and 6 <= hit_menu["cy"] <= 76,
+      str(hit_menu))
+check("菜单真图能认出分配图标，而且落点在右半屏",
+      hit_assign and 800 <= hit_assign["cx"] < 1600,
+      str(hit_assign))
+check("反面：港口画面不能误认成分配图标",
+      find_template(CFG_PORT, os.path.join(BASE, assign["image"]),
+                    roi=assign["roi"], threshold=assign["threshold"]) is None)
+config_states = [s for s in data["states"] if s.get("module") == "switch_config"]
+config_ids = ["switch_config_open_menu", "switch_config_open_assign", "switch_config_choose"]
+check("更改配置是独立模块，三步顺序固定为 开菜单 → 点分配 → 选择配置",
+      [s.get("id") for s in config_states] == config_ids
+      and config_states[0].get("entry") is True
+      and config_states[0].get("next") == config_ids[1]
+      and config_states[1].get("next") == config_ids[2]
+      and config_states[2].get("next") is None,
+      str([(s.get("id"), s.get("next")) for s in config_states]))
+check("前两步只按模板点击；第三步按名称选择、退回港口、再恢复原链",
+      [a.get("type") for a in config_states[0]["actions"]] == ["click_template", "wait"]
+      and [a.get("type") for a in config_states[1]["actions"]] == ["click_template", "wait"]
+      and [a.get("type") for a in config_states[2]["actions"]]
+          == ["switch_config_select", "exit_to_port", "switch_config_resume"]
+      and not any(a.get("type") == "click" for s in config_states for a in s["actions"]),
+      str([[a.get("type") for a in s["actions"]] for s in config_states]))
+eng, ctl = make_engine(CFG_PORT)
+ok, msg = eng._run_action_with_timeout(config_states[0]["actions"][0], ctl, CFG_PORT)
+check("主动作入口真能按三横线模板点击一次",
+      ok and len(ctl.clicks) == 1 and 1500 <= ctl.clicks[0][0] <= 1586,
+      str((ok, msg, ctl.clicks)))
+eng, ctl = make_engine(CFG_MENU)
+ok, msg = eng._run_action_with_timeout(config_states[1]["actions"][0], ctl, CFG_MENU)
+check("主动作入口真能在右半屏按分配模板点击一次",
+      ok and len(ctl.clicks) == 1 and 800 <= ctl.clicks[0][0] < 1600,
+      str((ok, msg, ctl.clicks)))
+started = {}
+eng = StateMachineEngine("fake-adb", 16384, CFG_PORT)
+
+
+def fake_launch(self, data_arg, states_arg, module_arg, **kwargs):
+    started["module"] = module_arg
+    started["ids"] = [s["id"] for s in states_arg]
+    return {"ok": True, "message": "fake launch"}
+
+
+eng._launch = types.MethodType(fake_launch, eng)
+r = eng.start(module="switch_config")
+check("start(module=switch_config) 真走启动校验并裁出完整三步",
+      r.get("ok") is True and started == {
+          "module": "switch_config",
+          "ids": config_ids,
+      }, str((r, started)))
+
+print("=" * 72)
+print("26) find_ocr_in_list：假截图 + 假 OCR + 假滑动验证双向查找（绝不调用 ADB）")
+import vision  # noqa: E402
+
+real_ocr_find = vision.ocr_find
+ocr_calls = []
+view = {"offset": 2, "swipes": []}
+
+
+def fake_ocr_find(path, keyword, **kwargs):
+    ocr_calls.append((path, keyword, kwargs))
+    found = view["offset"] == 0
+    return {"found": found, "text": "顶部配置" if found else "别的配置",
+            "cx": 101 if found else None, "cy": 202 if found else None}
+
+
+def fake_swipe(x1, y1, x2, y2):
+    if y2 < y1:
+        view["offset"] = min(2, view["offset"] + 1)
+        view["swipes"].append("down")
+    else:
+        view["offset"] = max(0, view["offset"] - 1)
+        view["swipes"].append("up")
+
+
+def fake_capture():
+    return f"假截图-{view['offset']}.png"
+
+
+try:
+    vision.ocr_find = fake_ocr_find
+    hit = vision.find_ocr_in_list(
+        fake_capture(), "顶部配置", (36, 166, 332, 694),
+        swipe_range=(202, 720, 202, 300), max_swipes=1, max_swipes_up=2,
+        capture=fake_capture, swipe_func=fake_swipe, swipe_pause_ms=0,
+        preprocess=True, scale=2, binary_method="otsu", exact=True)
+    check("列表停在底部时会先向下试满，再反向向上两次命中顶部配置",
+          hit and hit["swipe_direction"] == "up" and hit["swipes_used"] == 2
+          and view["swipes"] == ["down", "up", "up"], str((hit, view["swipes"])))
+    check("每一屏都只交给假 OCR，ROI / 预处理 / exact 参数完整透传",
+          len(ocr_calls) == 4
+          and all(c[2].get("roi") == (36, 166, 332, 694) for c in ocr_calls)
+          and all(c[2].get("binary_method") == "otsu" and c[2].get("exact") is True
+                  for c in ocr_calls), str(ocr_calls))
+    view.update(offset=0, swipes=[])
+    ocr_calls.clear()
+    hit = vision.find_ocr_in_list(
+        fake_capture(), "顶部配置", (36, 166, 332, 694),
+        max_swipes=3, max_swipes_up=3, capture=fake_capture,
+        swipe_func=fake_swipe, swipe_pause_ms=0, exact=True)
+    check("假截图首屏就命中时不滑动，方向是 none",
+          hit and hit["swipe_direction"] == "none" and hit["swipes_used"] == 0
+          and view["swipes"] == [], str(hit))
+finally:
+    vision.ocr_find = real_ocr_find
+
+print("=" * 72)
+print("27) switch_config_select 这一格真跑一遍：假 OCR 报哪一行就点哪一行，「应用」「确定」按真模板认")
+# 上一轮的教训：只验纯函数 find_ocr_in_list 会漏掉「动作那一格」整条线 ——
+# 它才是真去点屏幕的那一步，点错一行就会把船队配置换成别人那一套。
+# 列表 OCR 仍旧换成假的（真机跑得慢、认字还不稳），但「应用」那一步换成真模板 + 真截图：
+# 这一刀从 OCR 改成模板匹配，靠假函数验不出来，必须让 vision.find_template 真的跑一遍。
+CFG_ACTION_RAW = config_states[2]["actions"][0]
+# 「确定」那张真图还没入库（要等真机弹一次确认框才裁得出来），所以真跑代码路径时借
+# 「应用」模板当替身：验的是「第三点也确实来自模板匹配，不是写死坐标」这一条。
+CFG_ACTION = dict(CFG_ACTION_RAW, confirm_template="UI-分配设置-应用")
+real_find_list = state_machine.find_ocr_in_list
+ocr_box = {"hit": None, "list_calls": [], "alerts": []}
+
+
+def fake_find_ocr_in_list(screen, keyword, roi, **kw):
+    ocr_box["list_calls"].append({"keyword": keyword, "roi": roi, "kw": kw})
+    return ocr_box["hit"]
+
+
+apply_tpl = tpl_entries.get("UI-分配设置-应用") or {}
+check("「应用」按钮已经做成模板：只裁按钮上那两个字，阈值 0.9，只在右下角那块区域找",
+      apply_tpl.get("roi") == [1350, 780, 210, 90]
+      and apply_tpl.get("threshold") == 0.9
+      and apply_tpl.get("image") and os.path.exists(os.path.join(BASE, apply_tpl["image"])),
+      str(apply_tpl))
+check("states.json 这一格配的是模板名，旧的 apply_region（OCR 区域）已经不再被读",
+      CFG_ACTION.get("apply_template") == "UI-分配设置-应用"
+      and "apply_region" not in CFG_ACTION, str(CFG_ACTION))
+hit_apply = find_template(CFG_APPLY, os.path.join(BASE, apply_tpl["image"]),
+                          roi=tuple(apply_tpl["roi"]), threshold=apply_tpl["threshold"])
+check("分配设置真图（已选中一行）认得出「应用」，落点在金色按钮上",
+      hit_apply and hit_apply["cx"] == 1454 and hit_apply["cy"] == 825, str(hit_apply))
+check("反面：上一级菜单那一页没有这个按钮，模板不能误命中（误命中就是凭空多点一下）",
+      find_template(CFG_MENU, os.path.join(BASE, apply_tpl["image"]),
+                    roi=tuple(apply_tpl["roi"]), threshold=apply_tpl["threshold"]) is None)
+
+check("states.json 这一格还配了确认弹窗：点完应用要按模板点『确定』，这次改动才算提交",
+      CFG_ACTION_RAW.get("confirm_template") == "UI-分配设置-确定"
+      and CFG_ACTION_RAW.get("confirm_wait_ms") == 1000, str(CFG_ACTION_RAW))
+check("『UI-分配设置-确定』这张模板还没入库（等真机弹一次确认框截图来裁）—— 素材到位后把这条改成正面验落点",
+      "UI-分配设置-确定" not in tpl_entries)
+
+
+def switch_engine(config_name="买货量+15%", point="before_buy", pos=0, apply_shot=CFG_APPLY,
+                  confirm_shot=None):
+    """装着当前配置请求的引擎：截图和睡眠全换成假的，一次 ADB 都不发。
+
+    「应用」「确定」两张截图换成真图，让真模板匹配真的跑；
+    传 CFG_MENU 就模拟「这一页找不到按钮」那一条分支（默认确定和应用是同一页）。
+    """
+    eng, ctl = make_engine(CFG_MENU)
+    confirm_shot = CFG_APPLY if confirm_shot is None else confirm_shot
+
+    def snap_by_prefix(_ctl, path, what="截图"):
+        if path.endswith("state_screen_switch_config_apply.png"):
+            src = apply_shot
+        elif path.endswith("state_screen_switch_config_confirm.png"):
+            src = confirm_shot
+        else:
+            src = CFG_MENU
+        shutil.copyfile(src, path)
+        return True, "fake"
+    eng._snap = snap_by_prefix
+    eng.trip = {"pos": pos, "stops": [{"stage": "buy", "port": "汉堡", "goods": ["啤酒"]}],
+                "entries": {"buy": "in_port"}, "switch_completed": [],
+                "options": {"switch_config": {
+                    point: {"enabled": True, "config_name": config_name}}}}
+    eng.trip["switch_request"] = {"key": f"{pos}:{point}", "point": point,
+                                  "config_name": config_name, "resume_state": "in_port"}
+    eng._sleep_interruptible = lambda s: None
+    eng._stop_for_human = lambda title, reason, detail: (
+        ocr_box.setdefault("alerts", []).append((title, reason, detail)),
+        f"停止：{reason}")[1]
+    return eng, ctl
+
+
+state_machine.find_ocr_in_list = fake_find_ocr_in_list
+try:
+    # ① 列表里认到了那一行，「应用」也用真模板认到了
+    ocr_box.update(hit={"cx": 202, "cy": 513, "swipes_used": 2, "swipe_direction": "down"},
+                   list_calls=[], alerts=[])
+    eng, ctl = switch_engine()
+    msg = eng._do_switch_config_select(CFG_ACTION, ctl, CFG_MENU)
+    check("认到名字就点那一行：横坐标用配好的 202、纵坐标用 OCR 报的那一行中心",
+          ctl.clicks[0] == (202, 513), str(ctl.clicks))
+    check("列表点完，第二点用真模板在真截图上认出「应用」并点它（不是盲点固定坐标）",
+          ctl.clicks[1] == (hit_apply["cx"], hit_apply["cy"]) == (1454, 825), str(ctl.clicks))
+    check("找列表用的是方案里配的那块 [36,166,332,694]，滑动参数也照 states.json 走",
+          ocr_box["list_calls"][0]["roi"] == (36, 166, 332, 694)
+          and ocr_box["list_calls"][0]["kw"].get("swipe_range") == (202, 720, 202, 300)
+          and ocr_box["list_calls"][0]["kw"].get("max_swipes") == 6
+          and ocr_box["list_calls"][0]["kw"].get("max_swipes_up") == 6,
+          str(ocr_box["list_calls"][0])[:150])
+    check("配置名必须整框相等才算命中（『买货』不能把『买货备用』那一行点走）",
+          ocr_box["list_calls"][0]["kw"].get("exact") is True,
+          str(ocr_box["list_calls"][0]["kw"].get("exact")))
+    check("「应用」只在配好的那块右下角区域里匹配，不在全图找（全图会和金色页签串档）",
+          1350 <= ctl.clicks[1][0] <= 1560 and 780 <= ctl.clicks[1][1] <= 870,
+          str(ctl.clicks[1]))
+    check("点完应用再点确认弹窗的『确定』：第三点同样来自模板匹配（这里借应用模板当替身，坐标一致）",
+          len(ctl.clicks) == 3 and ctl.clicks[2] == (1454, 825), str(ctl.clicks))
+    check("回话里念得出换了哪个配置、点完应用还走了确认、往哪个方向翻了几页",
+          "买货量+15%" in msg and "确认" in msg and "down" in msg and "2" in msg, str(msg)[:120])
+
+    # ② OCR 报的行中心落在列表框外面 —— 不能照着它点到框外去
+    ocr_box.update(hit={"cx": 202, "cy": 50, "swipes_used": 0, "swipe_direction": "none"},
+                   list_calls=[], alerts=[])
+    eng, ctl = switch_engine(point="before_sail", pos=1, config_name="航速")
+    eng._do_switch_config_select(CFG_ACTION, ctl, CFG_MENU)
+    check("OCR 报的 y 落在列表框上面时钳回框内第一行（166 以下不算这一列的点）",
+          ctl.clicks[0] == (202, 167), str(ctl.clicks))
+    check("出港前那一时点用的是自己那份配置名（不是抄买货那一格）",
+          ocr_box["list_calls"][0]["keyword"] == "航速", str(ocr_box["list_calls"][0]["keyword"]))
+
+    # ③ 列表翻完两向都没有这个名字
+    ocr_box.update(hit=None, list_calls=[], alerts=[])
+    eng, ctl = switch_engine(config_name="没录过的名字")
+    msg = eng._do_switch_config_select(CFG_ACTION, ctl, CFG_MENU)
+    check("列表里找不到目标配置 → 一次屏幕都没点（点错一行就是把配置换成别人的）",
+          ctl.clicks == [], str(ctl.clicks))
+    check("找不到时喊人，原因里念得出要找哪个名字",
+          len(ocr_box["alerts"]) == 1 and "没录过的名字" in ocr_box["alerts"][0][1],
+          str(ocr_box["alerts"])[:150])
+
+    # ④ 那一行点中了，右下角却认不出「应用」（这一页拿的是上一级菜单那张真图）
+    ocr_box.update(hit={"cx": 202, "cy": 300, "swipes_used": 1, "swipe_direction": "down"},
+                   list_calls=[], alerts=[])
+    eng, ctl = switch_engine(point="before_sell", config_name="卖货", apply_shot=CFG_MENU)
+    msg = eng._do_switch_config_select(CFG_ACTION, ctl, CFG_MENU)
+    check("认不出「应用」就只点那一行、不再往下点（不拿固定坐标硬试右下角）",
+          len(ctl.clicks) == 1 and ctl.clicks[0] == (202, 300), str(ctl.clicks))
+    check("这种情况照样停下来喊人，说的是「已经选中但没认出应用」",
+          len(ocr_box["alerts"]) == 1 and "应用" in ocr_box["alerts"][0][1]
+          and "UI-分配设置-应用" in ocr_box["alerts"][0][1],
+          str(ocr_box["alerts"])[:180])
+
+    # ⑤ 单模块裸跑这一格（没有整趟的当前请求）—— 必须明说，不能静默点下去
+    ocr_box.update(hit={"cx": 202, "cy": 513}, list_calls=[], alerts=[])
+    eng, ctl = switch_engine()
+    eng.trip["switch_request"] = None
+    try:
+        eng._do_switch_config_select(CFG_ACTION, ctl, CFG_MENU)
+        check("没有当前配置请求时这一格直接报错（不拿着上一个名字接着点）", False)
+    except ValueError as e:
+        check("没有当前配置请求时这一格直接报错（不拿着上一个名字接着点）",
+              "当前时点和游戏内配置名" in str(e) and ctl.clicks == [], str(e)[:80])
+
+    # ⑥ 应用点下去了，可确认弹窗里的「确定」认不出（这一页拿的是上一级菜单那张真图）
+    ocr_box.update(hit={"cx": 202, "cy": 513, "swipes_used": 0, "swipe_direction": "none"},
+                   list_calls=[], alerts=[])
+    eng, ctl = switch_engine(config_name="买货", apply_shot=CFG_APPLY, confirm_shot=CFG_MENU)
+    msg = eng._do_switch_config_select(CFG_ACTION, ctl, CFG_MENU)
+    check("认不出「确定」就停在这一点：只点了行和应用，绝不拿固定坐标去戳弹窗",
+          len(ctl.clicks) == 2, str(ctl.clicks))
+    check("这种情况停下来喊人，说的是「点了应用但没认出确定」",
+          len(ocr_box["alerts"]) == 1 and "确定" in ocr_box["alerts"][0][1],
+          str(ocr_box["alerts"])[:180])
+
+    # ⑦ 确认弹窗的模板压根没入库 —— 必须在一下都没点之前就拒绝
+    ocr_box.update(hit={"cx": 202, "cy": 513}, list_calls=[], alerts=[])
+    eng, ctl = switch_engine()
+    try:
+        eng._do_switch_config_select(dict(CFG_ACTION, confirm_template="UI-还没入库的确定"),
+                                     ctl, CFG_MENU)
+        check("按钮模板没入库时这一格在任何点击之前就拒绝（不是点完应用才发现）", False)
+    except ValueError as e:
+        check("按钮模板没入库时这一格在任何点击之前就拒绝（不是点完应用才发现）",
+              "按钮模板不存在" in str(e) and "UI-还没入库的确定" in str(e)
+              and ctl.clicks == [], str(e)[:100])
+finally:
+    state_machine.find_ocr_in_list = real_find_list
 
 print("=" * 72)
 print("结果:", "全部通过" if not FAILS else "失败项 = %s" % FAILS)

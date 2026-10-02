@@ -73,6 +73,7 @@ DATA = state_machine.load_states()
 BUY_IDS = {s["id"] for s in DATA["states"] if s.get("module") == "buy"}
 SAIL_IDS = {s["id"] for s in DATA["states"] if s.get("module") == "sail"}
 SELL_IDS = {s["id"] for s in DATA["states"] if s.get("module") == "sell"}
+SWITCH_IDS = {s["id"] for s in DATA["states"] if s.get("module") == "switch_config"}
 
 # 购物表格：本脚本用假目录，绝不读项目里那份真的（人会改表格，改了就把自检带崩）
 PLAN_ROWS = [
@@ -97,6 +98,11 @@ STOPS = [
     {"idx": 1, "stage": "transit", "port": "南安普顿", "goods": [], "note": ""},
     {"idx": 2, "stage": "sell", "port": "北京", "goods": [], "note": ""},
 ]
+SWITCH_OPTIONS = {"switch_config": {
+    "before_buy": {"enabled": True, "config_name": "买货配置"},
+    "before_sail": {"enabled": True, "config_name": "航速配置"},
+    "before_sell": {"enabled": True, "config_name": "卖货配置"},
+}}
 
 
 def one_stop(i):
@@ -120,11 +126,11 @@ def fresh():
     return e
 
 
-def started(stops=None, flag=True, current_port="汉堡"):
+def started(stops=None, flag=True, current_port="汉堡", options=None):
     with_flag(flag)
     e = fresh()
     r = e.start(module="trip", trip_stops=[dict(s) for s in (stops or STOPS)],
-                current_port=current_port)
+                current_port=current_port, trip_options=options)
     return e, r
 
 
@@ -156,10 +162,15 @@ check("自检用的是临时账本，没碰项目里的 run_state.json",
 check("启动成功", r["ok"], r["message"])
 check("module 交出去的是 trip", e.run_module == route_plan.TRIP_MODULE, str(e.run_module))
 got = {s["id"] for s in e.states}
-check("三条链一次装进来（买货 %d + 移动 %d + 卖货 %d）" % (len(BUY_IDS), len(SAIL_IDS), len(SELL_IDS)),
-      got == BUY_IDS | SAIL_IDS | SELL_IDS, str(sorted(got)))
-check("一条链都没被裁掉（整趟要跨链接力）",
-      not (got - (BUY_IDS | SAIL_IDS | SELL_IDS)) and len(got) == len(DATA["states"]))
+check("完整一趟一次装进买货 %d + 移动 %d + 卖货 %d + 切换配置 %d 个状态"
+      % (len(BUY_IDS), len(SAIL_IDS), len(SELL_IDS), len(SWITCH_IDS)),
+      got == BUY_IDS | SAIL_IDS | SELL_IDS | SWITCH_IDS, str(sorted(got)))
+trip_state_ids = {s["id"] for s in DATA["states"]
+                  if s.get("global") or s.get("module") in {"buy", "sail", "sell", "switch_config"}}
+check("整趟四条链一个状态都没被裁掉，切换配置完整三步也在其中",
+      got == trip_state_ids
+      and SWITCH_IDS == {"switch_config_open_menu", "switch_config_open_assign", "switch_config_choose"},
+      str(sorted(got)))
 check("第 1 站是买货：本次港口绑的是它", e.run_port == "汉堡", str(e.run_port))
 check("来源字段说清是 buy_port（日志/界面据此分「买货港/目的港/出货港」）",
       e.run_port_field == "buy_port", str(e.run_port_field))
@@ -278,7 +289,9 @@ try:
           not r["ok"] and "config.trip.modules" in r["message"], r["message"])
 
     state_machine.load_states = lambda: {
-        "config": DATA["config"],
+        # 这组假 states 只测三条业务链的 trip_entry；同步缩小 modules，避免真实配置里新增的
+        # switch_config 先触发「缺模块」而遮住本断言真正要测的错误。
+        "config": dict(DATA["config"], trip={"modules": ["buy", "sail", "sell"], "max_rounds": 400}),
         "states": [mk("p", "buy"), mk("q", "sail"), mk("z", "sell")]}
     e, r = started()
     check("状态里没人用 trip_entry 认领自己是谁的链头 -> 拒绝（引擎不猜）",
@@ -343,6 +356,61 @@ check("收尾文字用的是配置里那句 done_reason",
 check("收尾这一步不再退回码头（已经没下一趟船要开了）", e._exit_calls == [1], str(e._exit_calls))
 check("收尾不挂弹窗（这是好消息，不是出事了）", e._alert_request is None)
 check("退回码头整趟只调用了一次（每换一段点一次）", e._exit_calls == [1], str(e._exit_calls))
+
+print("=" * 72)
+print("C2) 三时点切换配置挂钩：买货前 / 出港前 / 卖货前，完成后回原链且不重复")
+e, r = started(options=SWITCH_OPTIONS)
+check("启用三时点后仍能启动，第一站先进入切换配置链",
+      r["ok"] and e.current_state == state_machine.SWITCH_CONFIG_ENTRY,
+      str((r, e.current_state)))
+check("before_buy 带着目标配置名，并记住要回买货链头",
+      e.trip["switch_request"] == {"key": "0:before_buy", "point": "before_buy",
+                                    "config_name": "买货配置", "resume_state": "in_port"},
+      str(e.trip["switch_request"]))
+msg = e._do_switch_config_resume()
+check("before_buy 完成后回原买货链，并登记完成键",
+      msg == "goto in_port" and e._pending_goto == "in_port"
+      and e.trip["switch_completed"] == ["0:before_buy"]
+      and e.trip["switch_request"] is None, str((msg, e.trip)))
+e._pending_goto = None
+err = e._bind_leg(0)
+check("同一站同一时点重新绑定不会重复切换",
+      err is None and e.current_state == "in_port" and e.trip["switch_request"] is None
+      and e.trip["switch_completed"] == ["0:before_buy"], str(e.trip))
+
+msg = e._do_action(W_ACT, ctl, SCR)
+check("买货做完准备开船时触发 before_sail，原链记为移动链头",
+      e.current_state == state_machine.SWITCH_CONFIG_ENTRY
+      and e.trip["switch_request"] == {"key": "0:before_sail", "point": "before_sail",
+                                       "config_name": "航速配置", "resume_state": "sail_from_port"},
+      str((msg, e.trip["switch_request"])))
+msg = e._do_switch_config_resume()
+check("before_sail 完成后回移动链头",
+      msg == "goto sail_from_port" and e._pending_goto == "sail_from_port"
+      and "0:before_sail" in e.trip["switch_completed"], str((msg, e.trip["switch_completed"])))
+e._pending_goto = None
+
+# 到达中转港后还要从该港继续开船；这是新的一段 before_sail，按站号 1 单独记账。
+e._do_action(A_ACT, ctl, SCR)
+check("中转港再次出港是另一个 before_sail（同一时点可在不同港各执行一次）",
+      e.trip["pos"] == 1 and e.trip["switch_request"]["key"] == "1:before_sail"
+      and e.trip["switch_request"]["resume_state"] == "sail_from_port",
+      str(e.trip["switch_request"]))
+e._do_switch_config_resume()
+e._pending_goto = None
+e._do_action(A_ACT, ctl, SCR)
+check("到达出货港触发 before_sell，并记住回卖货链头",
+      e.trip["pos"] == 2 and e.current_state == state_machine.SWITCH_CONFIG_ENTRY
+      and e.trip["switch_request"] == {"key": "2:before_sell", "point": "before_sell",
+                                       "config_name": "卖货配置", "resume_state": "sell_in_port"},
+      str(e.trip["switch_request"]))
+msg = e._do_switch_config_resume()
+check("before_sell 完成后回卖货链头；三个时点的完成键都保留",
+      msg == "goto sell_in_port" and e._pending_goto == "sell_in_port"
+      and e.trip["switch_completed"]
+          == ["0:before_buy", "0:before_sail", "1:before_sail", "2:before_sell"],
+      str((msg, e.trip["switch_completed"])))
+e.stop()
 
 print("=" * 72)
 print("D) 边角：单模块那一份行为、到账卖不成、写错的 after、表格中途被改")
@@ -418,7 +486,8 @@ e.stop()
 print("=" * 72)
 print("F) 轮次上限是从配置读的（整趟 400 轮，单模块 60 轮）")
 mods, cap = StateMachineEngine._trip_conf(DATA["config"])
-check("config.trip.modules 读出来就是那三条链", mods == ["buy", "sail", "sell"], str(mods))
+check("config.trip.modules 读出来是三条业务链 + 完整切换配置链",
+      mods == ["buy", "sail", "sell", "switch_config"], str(mods))
 check("config.trip.max_rounds 读出来是 400（单模块 60 轮跑不完一趟）",
       cap == 400, str(cap))
 check("没配 trip 时也有兜底（不让整趟一跑到第 60 轮自己判死）",
@@ -860,14 +929,19 @@ check("点「编辑」/「另存为新方案」会顺手展开方案设置（收
       "presetEditByIdx / presetSaveAsNew 里没找到展开调用")
 check("界面上把「三块默认收起、点哪一个展开哪一个」写出来了（不能让人自己猜）",
       "默认都是收起的" in plain and "点上面哪一个" in plain, "")
-check("两个带勾框的项：勾框直接长在二级标签上，勾与不勾不用点进去就看得见",
-      'id="flag-refit"' in html and 'id="flag-cfg"' in html
-      and 'id="flag-refit-state"' in html and 'id="flag-cfg-state"' in html)
-check("标签上的勾框和面板里的勾框写的是同一份草稿（四个都走 onOptionFlag，没有第二套状态）",
-      html.count('onchange="onOptionFlag(') == 2
-      and js.count('onchange="onOptionFlag(') == 2
-      and js_fn("onOptionFlag").count("enabled") >= 1,
-      "html %d / js %d" % (html.count('onchange="onOptionFlag('), js.count('onchange="onOptionFlag(')))
+check("改舱总开关留在二级标签；切换配置标签改为显示三时点启用数",
+      'id="flag-refit"' in html and 'id="flag-cfg"' not in html
+      and 'id="flag-refit-state"' in html and 'id="flag-cfg-state"' in html
+      and "已启用 ${enabledConfigs.length}/3" in js_fn("renderRouteOptions"))
+check("改舱开关走 onOptionFlag；三个配置时点都走 onConfigField，写回同一份 options 草稿",
+      html.count('onchange="onOptionFlag(') == 1
+      and js_fn("renderRefitBody").count('onchange="onOptionFlag(') == 1
+      and "o.switch_config[point]" in js_fn("onConfigField")
+      and js_fn("renderCfgBody").count("onConfigField(") == 2,
+      "html %d / refit %d / cfg %d" % (
+          html.count('onchange="onOptionFlag('),
+          js_fn("renderRefitBody").count('onchange="onOptionFlag('),
+          js_fn("renderCfgBody").count("onConfigField(")))
 check("切换面板只换这一栏内部的三块，左侧一级导航一个字不动（没多出一个 data-page）",
       'data-page="refit"' not in html and 'data-page="cfg"' not in html
       and "route-sub-plan" in js_fn("switchRouteTab") and "PAGES" not in js_fn("switchRouteTab"),
@@ -891,24 +965,28 @@ check("类别下拉的候选从 /api/plan 取（那 17 种只有表格栏一份�
       "routeCargoTypes = Array.isArray(plan.cargo_types)" in js_fn("loadPresetEditor"))
 check("没录判据的船种在界面上是**勾不上的占位项**（disabled，不是能选但存不进的选项）",
       '<option value="" disabled>（占位' in js_fn("renderRefitBody"))
-# 切换配置那一页：只有个勾，没有任何参数能落盘
-check("切换配置那一页是占位符：只有一个勾 + 一个禁用的输入框，界面上就写着占位",
-      "disabled" in js_fn("renderCfgBody") and "占位" in js_fn("renderCfgBody")
-      and "route-warn-item" in js_fn("renderCfgBody"))
-check("切换配置交出去的只有开关（配置名根本没地方存，后端也不认第二个项目）",
-      "switch_config: { enabled: c.enabled === true }" in js_fn("pickOptions")
-      and "config_name" not in js and "configName" not in js,
-      js_fn("pickOptions").strip().replace("\n", " ")[-90:])
-check("界面把「这两步引擎还不做」写在栏口那句说明上，不是藏在某一页里",
-      "引擎里没有对应动作" in plain and "只是记在方案里" in plain
-      and html.index("引擎里没有对应动作") < html.index('<div class="subtabs"'),
-      "那句说明得排在二级标签之前，切到哪一块都看得见")
+# 切换配置那一页：三个时点分别配开关和游戏内名称，已经接入队列与状态机
+cfg_body = js_fn("renderCfgBody")
+check("切换配置页按 CONFIG_POINTS 生成三个独立时点，每项都有开关和可编辑配置名",
+      "CONFIG_POINTS.map" in cfg_body and "item.enabled" in cfg_body
+      and "item.config_name" in cfg_body and "disabled" not in cfg_body
+      and "maxlength=\"40\"" in cfg_body, cfg_body.strip().replace("\n", " ")[:180])
+check("pickOptions 把三时点的 enabled / config_name 全部规整后交给后端",
+      "CONFIG_POINTS.forEach" in js_fn("pickOptions")
+      and "enabled: item.enabled === true" in js_fn("pickOptions")
+      and "config_name: String(item.config_name || \"\").trim()" in js_fn("pickOptions")
+      and "switch_config: switchConfig" in js_fn("pickOptions"),
+      js_fn("pickOptions").strip().replace("\n", " ")[-180:])
+check("界面在栏口说清三个独立时点，并明确切换配置会自动执行",
+      "买货前、出港前、卖货前" in plain and "三个独立开关" in plain
+      and "切换配置会在启用的时点自动进入“分配设置”" in plain)
 check("蓝钻那条规矩在界面上说得出（改舱只碰金币那一栏），并且写了实测那次的单价",
       "蓝色钻石" in html and "5,943,000" in html)
-check("切换配置为什么还没参数写在界面上（LV25「分配」没实测 / T-008）",
-      "LV25" in html and "T-008" in html)
-check("这一项以前的「别加」决定和今天的口径都留在界面上（免得以后又当成漏做的重新讨论）",
-      "先搁置" in html and "2026-10-01" in html)
+check("切换配置页写清分配设置、右半屏模板、OCR 列表和找不到即停",
+      "分配设置" in html and "屏幕右半区域" in html and "OCR 配置名" in html
+      and "停止喊人" in cfg_body)
+check("旧的占位口径已删掉，不再写『尚未接队列 / 先搁置 / 前两步已录』",
+      all(old not in html + js for old in ["尚未接入队列", "先搁置", "前两步已录"]))
 # 数据线：勾了要存得进去、脏检查要管得到、老方案要读得动
 check("保存方案真的把 options 交出去（不然这一页白填）",
       "options: core.options" in js_fn("saveRoute"))

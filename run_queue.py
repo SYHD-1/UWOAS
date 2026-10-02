@@ -24,13 +24,19 @@ state_machine.StateMachineEngine.__init__ 的注释），不看 `stop_reason` �
 **不算正常走完** —— 它在现有链里正是卖货出错那条路（没看到结算结果窗）。
 
 「当前所在港」本文件不再让人填：每趟启动前 OCR 读一次。读到的港在方案的进货港里 → 就从那一站
-走起；不在 → 弹窗问人（确定=先开去第一个进货港再整趟，取消=停队列）；连港名都读不出 →
-不弹窗直接停队列（船不在港口画面上，让人确认也没有可确认的信息）。
+走起；**不在 → 不停队列、也不问人**，直接把「从现在这个港开去第一个进货港」当第 0 站接着跑
+（2026-10-02 你指出「当前港口不在进货港口不应该停止而是应该前往第一个进货港口」）；
+连港名都读不出 → 停队列报错（船不在港口画面上，连「从哪儿开走」都写不出来）。
 
-**前置移动靠「加一个合成 transit 站」实现，不新增动作、不改状态链**：现有引擎里
-`transit 站 = 从这儿开去下一站`（见 state_machine 的 `_depart_binding`），所以把
-「当前港」当成第 0 个 transit 站插在最前面，它自然就变成「先航行到第一个进货港」，
-到港后由移动链尾的 `trip_next after=arrive` 接力进下一站。
+**前置移动靠「多给引擎一站」实现，不新增动作、不改状态链**：现有引擎里
+`transit 站 = 从这儿开去下一站`（见 state_machine 的 `_depart_binding`），所以把「当前港」当成
+第 0 个 transit 站，它自然就变成「先航行到第一个进货港」，到港后由移动链尾的
+`trip_next after=arrive` 接力进下一站。
+
+**这一站只交给引擎、不写进 route_plan.json**：盘上那份在 `run_module=trip` 保存时会自动把
+中转排到所有买货**之后**（2026-09-29 你拍的 A），「先开去进货港」就会被排成「买完货才开」，
+起步那一站直接错。所以 route_plan.json 里只有方案本身那几站，`current_port` 写读到的那个港 ——
+界面看到「这个港不在站次里」是对的，那一次开船由引擎收到的第 0 站负责。
 """
 
 import ctypes
@@ -123,26 +129,16 @@ def save_queue(record):
     return q
 
 
-def _ask_ok_cancel(title, message):
-    """Windows 置顶「确定 / 取消」弹窗，返回 True = 点了确定。
+def _legs(stops):
+    """站次 → 引擎要的 `trip_stops` 形状（每站 {idx, stage, port, goods, note}）。
 
-    为什么不用引擎的 `_alert`：那是 MB_OK，只有确定，没有「别跑」这个出口；
-    队列在「读到的港不在进货港里」时必须让人选「要不要先开过去」。
-    弹不出来（非 Windows / 没有桌面会话）返回 False —— 安全侧：不自动往前开，
-    宁可停队列报错，也不猜人的意思。
-
-    这个弹窗在**队列线程**里阻塞，这时引擎没在跑，不会把引擎的收尾卡住
-    （引擎 `_alert` 之所以放在 `_loop` 的 finally，理由正相反）。
+    只补下标、不做任何判断：「从第几站起走」仍然只有 `route_plan.derive()` 一处算
+    （见那个文件的口径「别在 JS 里再算一遍」）。这里要用它是因为「先开去进货港」那一站
+    是本次现场拼出来的、根本不在盘上那份站次里，`derive()` 自然切片不出它。
     """
-    try:
-        MB_OKCANCEL = 0x1
-        MB_ICONWARNING = 0x30
-        MB_TOPMOST = 0x40000    # 置顶：其它窗口盖着也能被看见
-        ret = ctypes.windll.user32.MessageBoxW(
-            0, str(message), str(title), MB_OKCANCEL | MB_ICONWARNING | MB_TOPMOST)
-        return ret == 1         # IDOK
-    except Exception:
-        return False
+    return [{"idx": i, "stage": s["stage"], "port": s["port"],
+             "goods": list(s.get("goods") or []), "note": s.get("note") or ""}
+            for i, s in enumerate(stops)]
 
 
 class QueueRunner:
@@ -348,26 +344,18 @@ class QueueRunner:
         if hit_port and hit_port in buy_ports:
             # 画面读到的港就是这一趟的某个进货港 → 就从那一站走起
             current_port = hit_port
+            pre_move = False
             self._log("plan", f"『{name}』：画面读到『{text}』，是方案里的进货港，从这一站走起")
         else:
             if not buy_ports:
-                self._fail(f"方案『{name}』里没有进货港，没法从『{text}』起步")
+                self._fail(f"方案『{name}』里一个进货港都没排，「去第一个进货港」没有去处")
                 return False
-            # ② 弹窗等人工：确定=先开去第一个进货港，取消=停队列
-            self._set_phase("等人工确认")
-            msg = (f"船现在停在『{text}』，它不在方案『{name}』的进货港里。\n\n"
-                   f"方案的进货港：{'、'.join(buy_ports)}\n\n"
-                   f"点「确定」：先从『{text}』开去第一个进货港『{buy_ports[0]}』，再整趟跑完。\n"
-                   f"点「取消」：停掉队列。")
-            if not _ask_ok_cancel("UWO 队列：当前港口不在进货港里", msg):
-                self._finish(f"人工取消（船在『{text}』，不在『{name}』的进货港里）")
-                return False
-            # 合成一个 transit 站插在最前面：现有引擎里 transit 站 = 从这儿开去下一站，
-            # 所以它自然就是「先航行到第一个进货港」（见本文件头部说明）。
-            stops = [{"stage": "transit", "port": text, "goods": [],
-                      "note": "从当前港开去进货港"}] + stops
-            current_port = text
-            self._log("plan", f"『{name}』：人工确认，先从『{text}』开去『{buy_ports[0]}』")
+            # ② 不在进货港里：不停下来问人，直接先开去第一个进货港（2026-10-02 你拍的口径）
+            # 读到的港是方案里已有的一站（中转 / 出货）就用那个规范港名，OCR 那串原文常常带第二行。
+            current_port = hit_port or text
+            pre_move = True
+            self._log("plan", f"『{name}』：画面读到『{text}』不是进货港，"
+                              f"先从『{current_port}』开去第一个进货港『{buy_ports[0]}』")
 
         # ③ 铺进 route_plan.json（这一趟的规划由本线程写，人不再手填）
         self._set_phase("启动")
@@ -382,7 +370,14 @@ class QueueRunner:
             return False
         route_plan.save_route(route)
         derived = route_plan.derive(route)
-        trip_stops = derived.get("trip_stops") or []
+        if pre_move:
+            # 拼上第 0 站「从现在这个港开去第一个进货港」，只交给引擎、不进盘上那份
+            # （写进去会被自动重排到所有买货之后，见本文件头部）。
+            trip_stops = _legs([{"stage": "transit", "port": current_port, "goods": [],
+                                 "note": f"从当前港开去第一个进货港『{buy_ports[0]}』"}]
+                               + route["stops"])
+        else:
+            trip_stops = derived.get("trip_stops") or []
         if not trip_stops:
             self._fail(f"方案『{name}』不知道从哪一站走起: "
                        + (derived.get("trip_reason") or "站次是空的"))
@@ -397,6 +392,7 @@ class QueueRunner:
             module=route_plan.TRIP_MODULE,
             current_port=current_port,
             trip_stops=trip_stops,
+            trip_options=preset.get("options"),
         )
         if not result.get("ok"):
             self._fail(f"方案『{name}』启动失败: {result.get('message')}")

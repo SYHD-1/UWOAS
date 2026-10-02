@@ -958,7 +958,7 @@ const ACTION_TYPES = [
   "click_after_template", "swipe", "input", "key", "wait", "negotiation",
   "buy_commodities", "plan_advance", "set_flag", "retry_watch", "wait_restock",
   "wait_arrival", "trip_next", "ensure_input", "confirm_city_move", "exit_to_port",
-  "goto", "stop", "if", "run_actions",
+  "switch_config_select", "switch_config_resume", "goto", "stop", "if", "run_actions",
 ];
 // 运行态开关的名字必须和后端 run_state.py 里的 FLAGS 一字不差：
 // 这里只是下拉框的候选，写错后端会当场报错，不会静默写进一个没人读的文件字段。
@@ -1030,6 +1030,13 @@ function defaultAction(type) {
     case "exit_to_port":
       return { type: "exit_to_port", max_clicks: 3, wait_ms: 1200,
                port_marker: "UI-港口标志", timeout_seconds: 20 };
+    case "switch_config_select":
+      return { type: "switch_config_select", region: "分配配置列表",
+               swipe_range: [202, 720, 202, 300], max_swipes: 6, max_swipes_up: 6,
+               swipe_pause_ms: 800, click_x: 202, apply_template: "UI-分配设置-应用",
+               apply_wait_ms: 1500, confirm_template: "UI-分配设置-确定",
+               confirm_wait_ms: 1000, timeout_seconds: 180 };
+    case "switch_config_resume": return { type: "switch_config_resume" };
     case "trip_next":
       return { type: "trip_next", after: "work", reason: "", done_reason: "" };
     case "if": return { type: "if", condition: defaultCondition("template"), condition_timeout_ms: 0, then: [], else: [] };
@@ -1440,7 +1447,31 @@ function renderActionFields(a, body) {
       body.appendChild(selectField("port_marker（确认已经退回港口的模板）", tmpl, a.port_marker, v => a.port_marker = v));
       body.appendChild(numField("timeout_seconds（本动作的看门狗，要够点完 max_clicks 轮）", a.timeout_seconds, v => a.timeout_seconds = v));
       body.appendChild(divHint("只在链条收尾时用：看到右上角房子 / X 才点，点完重截屏，直到能用 port_marker 确认已经回到港口界面。"));
-      body.appendChild(divHint("卖货后必须先退回港口再 trip_next；否则下一段买货会从交易所页面读港口名，读不到就整趟卡住。退不回港口时这个动作会停止并弹窗喊人，不继续接下一段。"));
+      body.appendChild(divHint("卖货或切换配置后必须先退回港口再继续；否则下一段会从错误页面起步。退不回港口时这个动作会停止并弹窗喊人。"));
+      break;
+    case "switch_config_select":
+      body.appendChild(selectField("region（自定义配置名列表）", regions, a.region, v => a.region = v));
+      body.appendChild(numField("click_x（命中名字后点击该行的横坐标）", a.click_x, v => a.click_x = v));
+      body.appendChild(numField("max_swipes（向下找几页）", a.max_swipes, v => a.max_swipes = v));
+      body.appendChild(numField("max_swipes_up（反向再找几页）", a.max_swipes_up, v => a.max_swipes_up = v));
+      body.appendChild(selectField("apply_template（点『应用』用的模板）", tmpl, a.apply_template, v => a.apply_template = v));
+      body.appendChild(numField("apply_wait_ms（点完应用后等多久）", a.apply_wait_ms, v => a.apply_wait_ms = v));
+      // 模板还没入库时下拉里没这个选项，会把已配好的名字显示成「（未选择）」——
+      // 补进候选列表，界面才如实反映 states.json 里写的名字。
+      const ctmpl = a.confirm_template && !tmpl.includes(a.confirm_template)
+        ? [...tmpl, a.confirm_template] : tmpl;
+      body.appendChild(selectField("confirm_template（确认弹窗里点『确定』用的模板）", ctmpl, a.confirm_template, v => a.confirm_template = v));
+      body.appendChild(numField("confirm_wait_ms（点完确定后等多久）", a.confirm_wait_ms, v => a.confirm_wait_ms = v));
+      body.appendChild(numField("timeout_seconds", a.timeout_seconds, v => a.timeout_seconds = v));
+      body.appendChild(divHint("配置名来自当前方案对应时点；找不到就停止喊人，不会猜一行乱点。"));
+      body.appendChild(divHint("「应用」「确定」都按模板认（只裁按钮上那两个字，阈值 0.9，只在各自那块区域里找），"
+        + "认不出就停下喊人 —— 这两步盲点固定坐标会把分配设置页面点到别的地方去。"));
+      body.appendChild(divHint("下拉里显示「（未选择）」= 模板库里还没有这张模板：先去模板库登记 "
+        + "『UI-分配设置-确定』（弹出确认框时截一张图，裁出确定那两个字 + 配好 ROI），这一格才跑得动。"));
+      body.appendChild(divHint("点完确定之后由后面的 exit_to_port 点右上角小房子退回港口界面，退不回就停下喊人。"));
+      break;
+    case "switch_config_resume":
+      body.appendChild(divHint("切换并返回港口后，继续当前站原定的买货、移动或卖货链头。"));
       break;
     case "trip_next":
       if (a.after !== "work" && a.after !== "arrive") a.after = "work";
@@ -2039,7 +2070,7 @@ async function startQueue() {
   /* 买货、出港、卖货都花真金币、不可逆，所以点下去之前把「跑谁、跑几遍」念清楚再问一次。 */
   if (!confirm(`启动队列？\n顺序：${items.join(" → ")}\n循环：${modeTxt}\n\n`
     + "每一趟都是完整流程（买货 → 可选中转 → 出货），跑在后端线程里 —— 关掉浏览器也继续。\n"
-    + "每趟启动前会自己 OCR 读一次当前港口；读到的港不在进货港里会弹窗问你。\n"
+    + "每趟启动前会自己 OCR 读一次当前港口；读到的港不在进货港里会先开去第一个进货港（多一次船票钱）。\n"
     + "确认人在屏幕前再点确定。")) {
     btn.disabled = false;
     return;
@@ -2900,7 +2931,7 @@ window.addEventListener("beforeunload", (e) => {
      · stops   有序站次：买货（可多个）→ 中转（可多个）→ 出货，每段内部也按这里的先后。
                买货站额外挂 goods = 这一站要买的货（名称从该港的目录里挑，顺序就是买的顺序）。
      · options 附加步骤（二级那两块）：refit = 购买前改舱（船种 / 哪几格 / 改成什么舱），
-               switch_config = 切换配置（只有个勾，占位）。**只记在方案里，引擎还没这两步**。
+               switch_config = 三个时点各自设置是否切换及游戏内自定义配置名；队列会把它交给完整一趟。
    方案里**不再有「本次跑哪个模块」**（后端 normalize_preset 一律按完整一趟 run_module=trip 存），
    也**没有「当前所在港」**：跑哪几个方案、按什么顺序、跑几遍 = 「运行」栏的队列（后端线程）；
    船现在停在哪个港 = 队列每趟启动前自己 OCR 读一次。
@@ -2934,7 +2965,7 @@ const STOP_STAGES = [
 
 /* 模块 id 是 states.json 里人手填的英文，界面上给常见几个配中文名。
    认不出来的照常显示原 id —— 模块清单以 states.json 为准，这里不写死一份白名单。 */
-const MODULE_LABELS = { buy: "买货", sail: "港口间移动", sell: "卖货", trip: "完整一趟" };
+const MODULE_LABELS = { buy: "买货", sail: "港口间移动", sell: "卖货", switch_config: "更改配置", trip: "完整一趟" };
 /* 名字和后端 route_plan.TRIP_MODULE 一致（自检会比对两边）。这一栏已经没有模块下拉了，
    常量留着只为认得出「这个 id 就是整趟」并把它念成中文。 */
 const TRIP_MODULE = "trip";
@@ -2982,10 +3013,16 @@ function pickPreset(p) {
 /* 附加步骤那份：界面上那三个字段 + 两个勾。
    缺项一律补默认，不把「没填」当成「勾上了」—— 老方案文件里根本没有 options 这一项
    （2026-10-01 之前存的），读回来得照样能编辑。 */
+const CONFIG_POINTS = [
+  { key: "before_buy", label: "每个买货港购买前", detail: "进入交易所买货之前" },
+  { key: "before_sail", label: "每次港口移动出港前", detail: "人在码头、进入出港所之前" },
+  { key: "before_sell", label: "到达出货港卖货前", detail: "进入交易所出售之前" },
+];
 function defaultOptions() {
   return {
     refit: { enabled: false, ship: REFIT_SHIPS[0], slots: [], cargo_type: "" },
-    switch_config: { enabled: false },
+    switch_config: Object.fromEntries(CONFIG_POINTS.map(p =>
+      [p.key, { enabled: false, config_name: "" }])),
   };
 }
 function pickOptions(o) {
@@ -2993,6 +3030,14 @@ function pickOptions(o) {
   const src = (o && typeof o === "object") ? o : {};
   const r = (src.refit && typeof src.refit === "object") ? src.refit : {};
   const c = (src.switch_config && typeof src.switch_config === "object") ? src.switch_config : {};
+  const switchConfig = {};
+  CONFIG_POINTS.forEach(p => {
+    const item = (c[p.key] && typeof c[p.key] === "object") ? c[p.key] : {};
+    switchConfig[p.key] = {
+      enabled: item.enabled === true,
+      config_name: String(item.config_name || "").trim(),
+    };
+  });
   return {
     refit: {
       enabled: r.enabled === true,
@@ -3003,7 +3048,7 @@ function pickOptions(o) {
         .map(x => String(x).trim()).includes(s)),
       cargo_type: String(r.cargo_type || "").trim(),
     },
-    switch_config: { enabled: c.enabled === true },
+    switch_config: switchConfig,
   };
 }
 
@@ -3306,9 +3351,16 @@ function refreshRouteOptions() {
 
 function onOptionFlag(which, on) {
   const o = routeOptions();
-  if (!o) return;
-  const key = which === "refit" ? "refit" : "switch_config";
-  o[key].enabled = !!on;
+  if (!o || which !== "refit") return;
+  o.refit.enabled = !!on;
+  refreshRouteOptions();
+}
+
+function onConfigField(point, key, value) {
+  const o = routeOptions();
+  const item = o && o.switch_config && o.switch_config[point];
+  if (!item || !["enabled", "config_name"].includes(key)) return;
+  item[key] = key === "enabled" ? !!value : String(value || "").trim();
   refreshRouteOptions();
 }
 
@@ -3348,18 +3400,18 @@ function planBuyCargoTypes() {
 
 function renderRouteOptions() {
   const o = routeOptions() || defaultOptions();
-  [["flag-refit", o.refit.enabled], ["flag-cfg", o.switch_config.enabled],
-   ["refit-enabled", o.refit.enabled], ["cfg-enabled", o.switch_config.enabled]]
+  [["flag-refit", o.refit.enabled], ["refit-enabled", o.refit.enabled]]
     .forEach(([id, on]) => { const el = $(id); if (el) el.checked = on; });
   const rs = $("flag-refit-state");
   if (rs) {
     rs.textContent = o.refit.enabled ? "要改" : "不改";
     rs.classList.toggle("on", o.refit.enabled);
   }
+  const enabledConfigs = CONFIG_POINTS.filter(p => o.switch_config[p.key].enabled);
   const cs = $("flag-cfg-state");
   if (cs) {
-    cs.textContent = o.switch_config.enabled ? "已勾 · 还没实现" : "占位";
-    cs.classList.toggle("on", o.switch_config.enabled);
+    cs.textContent = enabledConfigs.length ? `已启用 ${enabledConfigs.length}/3` : "未启用";
+    cs.classList.toggle("on", enabledConfigs.length > 0);
   }
   renderRefitBody(o.refit);
   renderCfgBody(o.switch_config);
@@ -3428,16 +3480,24 @@ function renderRefitBody(o) {
 function renderCfgBody(o) {
   const box = $("cfg-body");
   if (!box) return;
+  const rows = CONFIG_POINTS.map(p => {
+    const item = o[p.key];
+    const missing = item.enabled && !item.config_name;
+    return `<div class="opt-slots">
+      <label class="opt-flag"><input type="checkbox"${item.enabled ? " checked" : ""}
+        onchange="onConfigField('${p.key}', 'enabled', this.checked)"> <b>${p.label}</b></label>
+      <div class="opt-state">${p.detail}：<b>${item.enabled ? "要切换" : "不切换"}</b></div>
+      <div class="field-row"><div class="field"><label>游戏内自定义配置名
+        <input type="text" maxlength="40" value="${escapeHtml(item.config_name)}"
+          placeholder="必须和游戏左侧列表显示的名字一致"
+          onchange="onConfigField('${p.key}', 'config_name', this.value)"></label></div></div>
+      ${missing ? `<div class="route-warn-item">已勾选，但配置名还是空的 —— 保存方案会被后端拒绝。</div>` : ""}
+    </div>`;
+  }).join("");
   box.innerHTML = `
-    <label class="opt-flag"><input type="checkbox" id="cfg-enabled"${o.enabled ? " checked" : ""}
-      onchange="onOptionFlag('switch_config', this.checked)"> <b>本次购买前先换船队配置</b></label>
-    <div class="opt-state">现在这一趟：<b>${o.enabled ? "要换配置" : "不换配置"}</b></div>
-    <div class="field-row">
-      <div class="field"><label>换成哪一档配置 <b class="route-off">（占位 · 还没有候选可选）</b>
-        <input type="text" disabled placeholder="（占位）那几档配置叫什么、画面上长什么样，一个字都没记过"></label></div>
-    </div>
-    <div class="route-warn-item"><b>这一整块是占位符</b>：勾上只是把「这一趟要换配置」记在方案里，
-      引擎没有对应的动作，点启动不会去菜单里换配置。</div>`;
+    <div class="opt-state">三个时点各自独立；同一时点会在每一个符合条件的港口执行。配置名由 OCR 在左侧列表区域识别，找不到会上下滑动后停止喊人。</div>
+    ${rows}
+    <div class="goods-tip">识别区域固定为 <b>[36,166,332,694]</b>，命中名字后点击该行方框，再点“应用”并返回港口，随后继续原来的买货、移动或卖货链。</div>`;
 }
 
 /* 把草稿整片刷到界面上。方案名从草稿回填到输入框（换方案、另存为之后要看得见）。

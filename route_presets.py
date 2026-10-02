@@ -14,7 +14,11 @@
           "options": {
             "refit": {"enabled": true, "ship": "改良荒木船",
                       "slots": ["1行2列", "1行3列", "3行3列"], "cargo_type": "艺术作品"},
-            "switch_config": {"enabled": false}
+            "switch_config": {
+              "before_buy": {"enabled": true, "config_name": "买货配置"},
+              "before_sail": {"enabled": false, "config_name": ""},
+              "before_sell": {"enabled": true, "config_name": "卖货配置"}
+            }
           },
           "saved_at": "2026-09-29 15:20"
         }
@@ -43,14 +47,12 @@
 「非买货段不许挂货物清单」「出货段只能一站」这些规矩，方案和未来那一趟必须完全一样，
 不然会出现「存得进方案、读出来却保存不了」。
 
-`options` 是 2026-10-01 加的第二级：跑商设置那一栏除了「这一趟怎么走」，还要记
-「买之前先做哪两件事」—— 造船所改船舱（`跑商流程.txt` 第 3 步）和换船队配置（第 2 步）。
-两条都只**记在方案里**，`to_route()` 不带它们，引擎一个字都不读：
-· 改舱的点击链已在 LV80·北京号实测跑通（2026-09-23），但还没编成 states.json 里的状态，
-  卡在「怎么知道底部价格条是金币还是蓝钻」那张角标模板（待办 T-002 / T-003）；
-· 换船队配置连游戏里那扇界面都没实测过（「分配」按钮要 LV25，待办 T-008），所以只有个勾。
-把参数存进方案而不是一上来就接引擎，是因为改舱花真金币、不可逆：先把要改什么定下来，
-等判据齐了再接点击链，接的那天这份数据已经在盘上了。
+`options` 是跑商设置里的附加步骤：`refit` 记录购买前改舱，`switch_config` 分别记录
+每个买货港购买前、每次港口移动出港前、到达出货港卖货前是否切换，以及目标游戏配置名。
+`to_route()` 故意不带 options：route_plan.json 只保存当前站次；队列启动时从方案库取出 options，
+直接作为 `trip_options` 交给引擎。切换配置会按时点进入 states.json 的 switch_config 链，按名称
+滚动 OCR 配置列表、点击对应行和“应用”、返回港口，再恢复原定的买货、移动或卖货入口。
+购买前改舱仍只保存参数，尚未接入完整一趟。
 """
 
 import json
@@ -75,7 +77,8 @@ REFIT_SHIPS = ["改良荒木船"]
 REFIT_SLOTS = ["1行2列", "1行3列", "3行3列"]
 OPTION_KEYS = ("refit", "switch_config")
 REFIT_KEYS = ("enabled", "ship", "slots", "cargo_type")
-SWITCH_CONFIG_KEYS = ("enabled",)
+SWITCH_CONFIG_POINTS = ("before_buy", "before_sail", "before_sell")
+SWITCH_CONFIG_POINT_KEYS = ("enabled", "config_name")
 
 
 def default_options():
@@ -86,7 +89,10 @@ def default_options():
     """
     return {
         "refit": {"enabled": False, "ship": REFIT_SHIPS[0], "slots": [], "cargo_type": ""},
-        "switch_config": {"enabled": False},
+        "switch_config": {
+            point: {"enabled": False, "config_name": ""}
+            for point in SWITCH_CONFIG_POINTS
+        },
     }
 
 
@@ -97,11 +103,7 @@ def _must_bool(label, v):
 
 
 def normalize_options(raw):
-    """规整方案的附加步骤：{refit:{enabled, ship, slots, cargo_type}, switch_config:{enabled}}。
-
-    不认识的项目一律报错（和方案本体同一条口径）：界面和后端各写一套字段名，
-    迟早会出现「界面上填了、盘上根本没存」那种看起来成功了的状态。
-    """
+    """规整改舱参数与三个切换配置时点；不认识的项目一律报错。"""
     if raw is None:
         return default_options()
     if not isinstance(raw, dict):
@@ -152,13 +154,38 @@ def normalize_options(raw):
     cfg = raw.get("switch_config")
     if cfg is not None:
         if not isinstance(cfg, dict):
-            raise ValueError("『切换配置』必须是一个对象 {enabled}")
-        bad = [k for k in cfg if k not in SWITCH_CONFIG_KEYS]
-        if bad:
-            raise ValueError("『切换配置』里有不认识的项目: " + "、".join(sorted(bad))
-                             + " —— 这一步还没实现，只有个开关")
-        out["switch_config"] = {"enabled": _must_bool("『切换配置』的开关",
-                                                      cfg.get("enabled", False))}
+            raise ValueError("『切换配置』必须是一个对象 {before_buy, before_sail, before_sell}")
+        # 旧版只有一个占位开关，没有配置名，实际从未接入队列。读到它时全部迁移为关闭，
+        # 不能把一个没有目标名称的旧勾框变成会自动点击的真动作。
+        if set(cfg).issubset({"enabled"}):
+            _must_bool("旧版『切换配置』的开关", cfg.get("enabled", False))
+        else:
+            bad = [k for k in cfg if k not in SWITCH_CONFIG_POINTS]
+            if bad:
+                raise ValueError("『切换配置』里有不认识的时点: " + "、".join(sorted(bad)))
+            normalized = {}
+            labels = {
+                "before_buy": "每个买货港购买前",
+                "before_sail": "每次港口移动出港前",
+                "before_sell": "到达出货港卖货前",
+            }
+            for point in SWITCH_CONFIG_POINTS:
+                item = cfg.get(point) or {}
+                if not isinstance(item, dict):
+                    raise ValueError(f"『{labels[point]}』必须是一个对象 {{enabled, config_name}}")
+                unknown = [k for k in item if k not in SWITCH_CONFIG_POINT_KEYS]
+                if unknown:
+                    raise ValueError(f"『{labels[point]}』里有不认识的项目: "
+                                     + "、".join(sorted(unknown)))
+                enabled = _must_bool(f"『{labels[point]}』的开关", item.get("enabled", False))
+                name = (item.get("config_name") or "").strip()
+                if len(name) > MAX_NAME_CHARS:
+                    raise ValueError(f"『{labels[point]}』的游戏内配置名太长了"
+                                     f"（{len(name)} 个字，最多 {MAX_NAME_CHARS} 个）")
+                if enabled and not name:
+                    raise ValueError(f"勾了『{labels[point]}』就必须填写游戏内自定义配置名")
+                normalized[point] = {"enabled": enabled, "config_name": name}
+            out["switch_config"] = normalized
     return out
 
 
@@ -250,8 +277,16 @@ def options_text(preset):
         parts.append(f"改舱：{refit.get('ship') or '（没选船）'} 的 "
                      f"{len(slots)} 格[{('、'.join(slots)) or '（没勾格）'}] → "
                      + (purchase_plan.cabin_name(ct) if ct else "（没选类别）"))
-    if (opts.get("switch_config") or {}).get("enabled"):
-        parts.append("切换配置（还没实现，只是记在这里）")
+    cfg = opts.get("switch_config") or {}
+    labels = {
+        "before_buy": "买货前",
+        "before_sail": "出港前",
+        "before_sell": "卖货前",
+    }
+    enabled = [f"{labels[p]}→{(cfg.get(p) or {}).get('config_name') or '（没填名字）'}"
+               for p in SWITCH_CONFIG_POINTS if (cfg.get(p) or {}).get("enabled")]
+    if enabled:
+        parts.append("切换配置：" + "、".join(enabled))
     return " ｜ ".join(parts)
 
 
@@ -276,11 +311,7 @@ def find(items, name):
 
 
 def to_route(preset, current_port):
-    """方案 + 界面上现在的「当前所在港」→ 一份可以直接写进 route_plan.json 的规划。
-
-    `options`（改舱 / 切换配置）**故意不带过去**：route_plan 那一层不认识它，
-    引擎里也还没有这两步的状态。写进盘上没人读的文件，比不写更坏 —— 见文件头说明。
-    """
+    """方案 + 当前所在港 → route_plan；options 由队列直接交给引擎，不写入规划文件。"""
     return {"run_module": preset.get("run_module") or "",
             "current_port": current_port or "",
             "stops": [dict(s, goods=list(s.get("goods") or [])) for s in preset.get("stops") or []]}

@@ -1,4 +1,4 @@
-"""跑全部 5 个离线自检，打印每个的 PASS/FAIL 计数和退出码。
+"""跑全部 6 个离线自检，打印每个的 PASS/FAIL 计数和退出码。
 
 为什么要连跑 3 轮：断言里有人手随机落点（模板矩形内随机取点），
 单轮通过不代表稳定 —— 这是之前定下的规矩。
@@ -11,7 +11,7 @@ import sys
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # 项目根 = selfcheck/ 的上一级（换目录/换机器都不用改）
 SCRIPTS = ["uwo_route_format_selfcheck.py", "uwo_module_selfcheck.py",
            "uwo_restock_selfcheck.py", "uwo_run_state_selfcheck.py",
-           "uwo_trip_selfcheck.py"]
+           "uwo_trip_selfcheck.py", "uwo_queue_selfcheck.py"]
 ROUNDS = int(sys.argv[1]) if len(sys.argv) > 1 else 1
 
 total_fail = 0

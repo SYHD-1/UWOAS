@@ -110,5 +110,17 @@
       "scale": 2,
       "binary_method": null
     }
+  },
+  {
+    "name": "分配设置标题",
+    "scene": "分配设置",
+    "roi": [74, 8, 210, 66],
+    "preprocess": {"scale": 2, "binary_method": null}
+  },
+  {
+    "name": "分配配置列表",
+    "scene": "分配设置",
+    "roi": [36, 166, 332, 694],
+    "preprocess": {"scale": 2, "binary_method": null}
   }
 ]

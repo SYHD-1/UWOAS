@@ -404,5 +404,52 @@
       70
     ],
     "threshold": 0.8
+  },
+  {
+    "name": "图标-菜单-三横线",
+    "image": "templates/tpl_menu_hamburger.png",
+    "roi": [
+      1500,
+      6,
+      86,
+      70
+    ],
+    "threshold": 0.85,
+    "category": "UI/菜单"
+  },
+  {
+    "name": "图标-菜单-分配",
+    "image": "templates/tpl_menu_assign.png",
+    "roi": [
+      800,
+      0,
+      800,
+      900
+    ],
+    "threshold": 0.85,
+    "category": "UI/菜单"
+  },
+  {
+    "name": "UI-分配设置-应用",
+    "image": "templates/tpl_config_apply.png",
+    "roi": [
+      1350,
+      780,
+      210,
+      90
+    ],
+    "threshold": 0.9,
+    "category": "UI/分配设置"
+  },
+  {
+    "name": "UI-分配设置-确定",
+    "image": "templates/tpl_1790953278_39.png",
+    "roi": [
+      804,
+      614,
+      183,
+      56
+    ],
+    "threshold": 0.8
   }
 ]

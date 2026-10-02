@@ -30,10 +30,12 @@ import time
 import purchase_plan
 import restock
 import route_plan
+import route_presets
 import run_state
 from mumu_controller import MuMuController, capture
-from vision import (OCR_REGIONS_JSON, find_in_list, find_template, ocr_find,
-                    ocr_find_in_region, ocr_text_by_region, scroll_list_to_top)
+from vision import (OCR_REGIONS_JSON, find_in_list, find_ocr_in_list, find_template,
+                    ocr_find, ocr_find_in_region, ocr_text_by_region,
+                    scroll_list_to_top)
 
 # 本文件所在目录：所有数据文件路径都基于它拼绝对路径，不受启动目录影响
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -48,6 +50,17 @@ PORT_FIELD_LABELS = {
     "sell_port": "本次出货港口",
     "sail_port": "目的港（只打进搜索框）",
 }
+SWITCH_POINT_BY_PORT_FIELD = {
+    "buy_port": "before_buy",
+    "sail_port": "before_sail",
+    "sell_port": "before_sell",
+}
+SWITCH_POINT_LABELS = {
+    "before_buy": "买货前",
+    "before_sail": "出港前",
+    "before_sell": "卖货前",
+}
+SWITCH_CONFIG_ENTRY = "switch_config_open_menu"
 
 DEFAULT_CONFIG = {
     "interval_ms": 500,        # 每轮间隔（毫秒）
@@ -360,17 +373,36 @@ class StateMachineEngine:
         return {"run_port": dest or None, "run_port_field": "sail_port", "run_rows": [],
                 "current_state": entry, "note": f"{what}，下一港是『{dest}』"}, None
 
+    @staticmethod
+    def _switch_request(trip, pos, binding):
+        point = SWITCH_POINT_BY_PORT_FIELD.get(binding.get("run_port_field"))
+        cfg = (((trip or {}).get("options") or {}).get("switch_config") or {}).get(point) or {}
+        key = f"{pos}:{point}"
+        done = set((trip or {}).get("switch_completed") or [])
+        if point and cfg.get("enabled") and key not in done:
+            return {"key": key, "point": point, "config_name": cfg.get("config_name") or ""}
+        return None
+
     def _apply_binding(self, pos, b):
-        """把一份绑定落到 self 上（换段的唯一落点），并给日志念一句这一站要做什么。"""
+        """把一份绑定落到 self 上；需要切配置时先转入配置链，再回到原链头。"""
         stops = self.trip["stops"]
         self.trip["pos"] = pos
         self.run_port = b["run_port"]
         self.run_port_field = b["run_port_field"]
         self.run_rows = b["run_rows"]
         self.run_row_index = 0
-        self.current_state = b["current_state"]
+        req = self._switch_request(self.trip, pos, b)
+        if req:
+            self.trip["switch_request"] = dict(req, resume_state=b["current_state"])
+            self.current_state = SWITCH_CONFIG_ENTRY
+            switch_note = (f"；先按『{SWITCH_POINT_LABELS[req['point']]}』切换到配置"
+                           f"『{req['config_name']}』，再进入 {b['current_state']}")
+        else:
+            self.trip["switch_request"] = None
+            self.current_state = b["current_state"]
+            switch_note = ""
         self._log("trip", f"第 {pos + 1}/{len(stops)} 站 "
-                          f"{self._trip_leg_text(stops[pos])}：{b['note']}")
+                          f"{self._trip_leg_text(stops[pos])}：{b['note']}{switch_note}")
 
     def _bind_leg(self, pos):
         """按 _leg_binding 算出来的样子落到 self 上。返回 None 或「走不下去」的原因。"""
@@ -433,7 +465,7 @@ class StateMachineEngine:
 
     # ---------- 对外控制 ----------
     def start(self, buy_port=None, buy_goods=None, sail_port=None, module=None,
-              current_port=None, sell_port=None, trip_stops=None):
+              current_port=None, sell_port=None, trip_stops=None, trip_options=None):
         """加载配置并启动后台线程。返回 {"ok": bool, "message": str}。
 
         module：本次跑**哪一个模块**。跑商流程被切成模块（买货 / 港口间移动 …）之后，
@@ -466,6 +498,7 @@ class StateMachineEngine:
 
         trip_stops：只给 module="trip" 用 —— 「从当前所在港这一站起、到这一趟结尾」的有序站次
         （route_plan.derive 算出来的那份切片，每站 {stage, port, goods, note}）。
+        trip_options：方案库里的附加步骤；切换配置按三个时点插进对应站次，完成后回原链头。
         整趟**没有**「一个本次港口」这回事：每一站各绑各的港名和清单（见 _bind_leg），
         所以上面那套单模块推断对 trip 完全不适用，走 _start_trip 那条路。
         """
@@ -528,7 +561,7 @@ class StateMachineEngine:
 
         if trip_mode:
             # 整趟**没有**「一个本次港口」：下面那一整段单模块推断对它不适用，各站各绑（见 _start_trip）
-            return self._start_trip(data, module_states, trip_stops, current_port)
+            return self._start_trip(data, module_states, trip_stops, current_port, trip_options)
 
         # 这个模块到底碰不碰购物表格、缺不缺港口名，从它自己的状态里读出来，
         # 不在代码里写死「买货才校验」—— 以后加卖货模块不用回来改这里。
@@ -695,7 +728,7 @@ class StateMachineEngine:
             self._thread.start()
         return {"ok": True, "message": "已启动"}
 
-    def _start_trip(self, data, module_states, trip_stops, current_port):
+    def _start_trip(self, data, module_states, trip_stops, current_port, trip_options=None):
         """完整一趟（module="trip"）的启动：先把**每一站**都算一遍，全算得通才起线程。
 
         为什么要预先逐站核对：整趟一口气要花掉好几次真金币（出港一次实测 699、买货另算），
@@ -705,6 +738,16 @@ class StateMachineEngine:
         raw = trip_stops if isinstance(trip_stops, list) else []
         stops = [s for s in raw if isinstance(s, dict)]
         cur = (current_port or "").strip()
+        try:
+            options = route_presets.normalize_options(trip_options)
+        except ValueError as e:
+            return {"ok": False, "message": f"完整一趟的附加步骤不能执行: {e}"}
+        if any((options["switch_config"][p] or {}).get("enabled")
+               for p in route_presets.SWITCH_CONFIG_POINTS):
+            state_ids = {s.get("id") for s in module_states}
+            if SWITCH_CONFIG_ENTRY not in state_ids:
+                return {"ok": False,
+                        "message": f"方案启用了切换配置，但完整一趟没有装载状态 {SWITCH_CONFIG_ENTRY}"}
         if not stops:
             return {"ok": False,
                     "message": "完整一趟没收到站次（启动时 trip_stops 是空的）—— "
@@ -756,10 +799,17 @@ class StateMachineEngine:
         b, err = self._leg_binding(stops, entries, 0, plan=plan)   # 上面已逐站验过，这里必定成功
         if err:
             return {"ok": False, "message": f"这一趟走不完：{err}"}
+        trip = {"stops": stops, "entries": entries, "pos": 0, "options": options,
+                "switch_completed": [], "switch_request": None}
+        req = self._switch_request(trip, 0, b)
+        if req:
+            trip["switch_request"] = dict(req, resume_state=b["current_state"])
+            initial_state = SWITCH_CONFIG_ENTRY
+        else:
+            initial_state = b["current_state"]
         started = self._launch(data, module_states, route_plan.TRIP_MODULE,
                                run_port=b["run_port"], run_port_field=b["run_port_field"],
-                               run_rows=b["run_rows"], current_state=b["current_state"],
-                               trip={"stops": stops, "entries": entries, "pos": 0})
+                               run_rows=b["run_rows"], current_state=initial_state, trip=trip)
         if not started["ok"]:
             return started
 
@@ -1045,8 +1095,8 @@ class StateMachineEngine:
     def _do_exit_to_port_action(self, action, ctl, screen_path):
         """动作版退回港口界面：只在某条链收尾时调用，退不回就停止喊人。
 
-        启动前的 _exit_to_port 是「尽量退一下，不拦启动」；这里相反：卖货结算后如果还停在交易所，
-        下一段买货/读港口名会从错误画面起步，所以必须确认港口标志再交给 trip_next。
+        启动前的 _exit_to_port 是「尽量退一下，不拦启动」；这里相反：链条操作结束后若还停在
+        子页面，后续状态会从错误画面起步，所以必须确认港口标志后才能继续。
         """
         cfg = self.config.get("exit_to_port") or {}
         names = action.get("buttons") or cfg.get("buttons") or []
@@ -1077,15 +1127,15 @@ class StateMachineEngine:
                 return f"已停止，退出港口动作停在第 {attempt} 轮之前"
             if self._device_state(ctl) != "device":
                 return self._stop_for_human(
-                    "UWO 已停止：卖货后退不回港口",
-                    "ADB 设备不可用，没法点击右上角房子退出交易所",
-                    "卖货已经走到收尾；继续接买货会从交易所页面读港口名，必然读不到。")
+                    "UWO 已停止：操作后退不回港口",
+                    "ADB 设备不可用，没法点击右上角房子/X 返回港口",
+                    "当前操作已经走到收尾；后续状态不能从这个子页面继续。")
             ok, info = self._snap(ctl, screen, "退出港口动作截图")
             if not ok:
                 return self._stop_for_human(
-                    "UWO 已停止：卖货后退不回港口",
+                    "UWO 已停止：操作后退不回港口",
                     f"截图失败：{info}",
-                    "卖货已经走到收尾；继续接买货会从旧画面起步，所以先停下等人看模拟器。")
+                    "当前操作已经走到收尾；后续状态会从旧画面起步，所以先停下等人看模拟器。")
 
             hit = self._match_exit_button(screen, names)
             if not hit:
@@ -1093,14 +1143,14 @@ class StateMachineEngine:
                 if ok:
                     return msg
                 return self._stop_for_human(
-                    "UWO 已停止：卖货后退不回港口",
+                    "UWO 已停止：操作后退不回港口",
                     "右上角没看到房子/X，也没看到港口标志",
-                    f"最后画面：{msg}。继续接买货会读不到港口名，所以没有执行后面的 trip_next。")
+                    f"最后画面：{msg}。后续状态不能从这个子页面继续，所以没有执行后面的动作。")
 
             px, py, note = self._tap(ctl, hit)
             clicks += 1
             self._log("exit_port",
-                      f"卖货收尾第 {attempt}/{max_clicks} 轮：匹配到『{hit['name']}』"
+                      f"操作收尾第 {attempt}/{max_clicks} 轮：匹配到『{hit['name']}』"
                       f"{note} 置信度{hit['confidence']}，点击退出")
             self._sleep_interruptible(wait)
 
@@ -1113,9 +1163,9 @@ class StateMachineEngine:
         else:
             detail = f"最终确认截图失败：{info}"
         return self._stop_for_human(
-            "UWO 已停止：卖货后退不回港口",
+            "UWO 已停止：操作后退不回港口",
             f"点了 {clicks} 次退出，仍不能确认已经回到港口界面",
-            f"{detail}。继续接买货会从错误画面读港口名，所以没有执行后面的 trip_next。")
+            f"{detail}。后续状态不能从错误画面继续，所以没有执行后面的动作。")
 
     # ---------- 入口检测 ----------
     def _detect_entry(self, ctl):
@@ -1670,6 +1720,12 @@ class StateMachineEngine:
         if t == "trip_next":
             return self._do_trip_next(action, ctl, screen_path)
 
+        if t == "switch_config_select":
+            return self._do_switch_config_select(action, ctl, screen_path)
+
+        if t == "switch_config_resume":
+            return self._do_switch_config_resume()
+
         if t == "negotiation":
             return self._do_negotiation(action, ctl, screen_path)
 
@@ -2189,6 +2245,106 @@ class StateMachineEngine:
                 return f"已停止，等待到港中退出（等了 {time.time() - started:.0f} 秒）"
             screen = self._capture(ctl, "arrival")
 
+    def _do_switch_config_select(self, action, ctl, screen_path):
+        """在分配设置的可滚动列表里按本次配置名选中对应行，点应用、再点确认弹窗的确定。
+
+        退出到港口界面交给这一格后面的 exit_to_port（点小房子），这里不碰。
+        """
+        req = (self.trip or {}).get("switch_request") or {}
+        name = (req.get("config_name") or "").strip()
+        point = req.get("point")
+        if not self.trip or not name or not point:
+            raise ValueError("切换配置动作没有收到当前时点和游戏内配置名")
+
+        region = action.get("region") or "分配配置列表"
+        roi = self._find_ocr_region_roi(region)
+        if roi is None:
+            raise ValueError(f"OCR 区域不存在或无 roi: {region}")
+        # 两颗按钮的模板在任何点击之前就查好：缺一张会等到点完「应用」才发现，
+        # 那时确认弹窗正开着，退也不是、留也不是。
+        apply_name = action.get("apply_template") or "UI-分配设置-应用"
+        confirm_name = action.get("confirm_template") or "UI-分配设置-确定"
+        tpl_path, tpl_roi, tpl_th = self._resolve_template(apply_name)
+        c_path, c_roi, c_th = self._resolve_template(confirm_name)
+        missing = [n for n, p in ((apply_name, tpl_path), (confirm_name, c_path)) if not p]
+        if missing:
+            raise ValueError("按钮模板不存在: " + "、".join(missing)
+                             + " —— 先在模板库里登记这两张（裁按钮上那两个字 + 配好 ROI），再跑这一格")
+        max_down = max(int(action.get("max_swipes", 6)), 0)
+        max_up = max(int(action.get("max_swipes_up", 6)), 0)
+        swipe_range = tuple(action.get("swipe_range") or ()) or None
+        screen = self._capture(ctl, "switch_config")
+        hit = find_ocr_in_list(
+            screen, name, roi, swipe_range=swipe_range,
+            max_swipes=max_down, max_swipes_up=max_up,
+            swipe_pause_ms=int(action.get("swipe_pause_ms", 800)),
+            capture=lambda: self._capture(ctl, "switch_config"),
+            swipe_func=lambda x1, y1, x2, y2: ctl.swipe(
+                x1, y1, x2, y2, duration=int(action.get("swipe_duration", 300))),
+            exact=True,
+        )
+        if not hit:
+            return self._stop_for_human(
+                "UWO 已停止：找不到船队配置",
+                f"{SWITCH_POINT_LABELS.get(point, point)}要切换到『{name}』，但列表里没认出来",
+                f"已经在区域 {list(roi)} 首屏、向下 {max_down} 次、向上 {max_up} 次逐页 OCR。"
+                "请核对前端填写的名字是否和游戏内完全一致，或检查列表是否加载完整。")
+
+        x, y, w, h = roi
+        click_x = int(action.get("click_x", x + w // 2))
+        click_y = max(y + 1, min(int(hit["cy"]), y + h - 1))
+        ctl.click(click_x, click_y)
+        self._log("action", f"配置列表 OCR 命中『{name}』，点击对应行 ({click_x},{click_y})；"
+                            f"方向 {hit.get('swipe_direction')}，滑动 {hit.get('swipes_used', 0)} 次")
+        self._sleep_interruptible(max(int(action.get("select_wait_ms", 800)), 0) / 1000)
+        if self._stop_event.is_set():
+            return f"已停止，配置『{name}』只选中、尚未点击应用"
+
+        apply_screen = self._capture(ctl, "switch_config_apply")
+        apply_hit = find_template(apply_screen, tpl_path, roi=tpl_roi, threshold=tpl_th)
+        if not apply_hit:
+            return self._stop_for_human(
+                "UWO 已停止：找不到应用按钮",
+                f"已经选中配置『{name}』，但没按模板『{apply_name}』（阈值 {tpl_th}）认出“应用”",
+                "没有盲点固定坐标，也没有继续往下点；请人工查看分配设置页。")
+        ctl.click(int(apply_hit["cx"]), int(apply_hit["cy"]))
+        self._log("action", f"应用按钮模板『{apply_name}』({apply_hit['cx']},{apply_hit['cy']}) "
+                            f"置信度{apply_hit['confidence']}，点击应用")
+        self._sleep_interruptible(max(int(action.get("apply_wait_ms", 1500)), 0) / 1000)
+        if self._stop_event.is_set():
+            return f"已停止，配置『{name}』点了应用、还没确认"
+
+        # 点完应用会弹一层确认框：不点「确定」这次改动等于没提交，
+        # 所以认不出就必须停下，绝不能直接去点房子。
+        confirm_screen = self._capture(ctl, "switch_config_confirm")
+        confirm_hit = find_template(confirm_screen, c_path, roi=c_roi, threshold=c_th)
+        if not confirm_hit:
+            return self._stop_for_human(
+                "UWO 已停止：找不到确定按钮",
+                f"点了『应用』之后，没按模板『{confirm_name}』（阈值 {c_th}）认出“确定”",
+                "没有盲点固定坐标，也没有点房子退出 —— 确认框没点掉，这次配置改动还没生效。"
+                "请人工看一眼那扇弹窗（可能弹的是别的东西，也可能按钮位置变了）。")
+        ctl.click(int(confirm_hit["cx"]), int(confirm_hit["cy"]))
+        self._log("action", f"确定按钮模板『{confirm_name}』({confirm_hit['cx']},{confirm_hit['cy']}) "
+                            f"置信度{confirm_hit['confidence']}，点击确定")
+        self._sleep_interruptible(max(int(action.get("confirm_wait_ms", 1000)), 0) / 1000)
+        return (f"{SWITCH_POINT_LABELS.get(point, point)}已选择配置『{name}』、点应用并确认；"
+                f"列表方向 {hit.get('swipe_direction')}，滑动 {hit.get('swipes_used', 0)} 次")
+
+    def _do_switch_config_resume(self):
+        """切换配置并回港后记一次完成，返回原定的买货、移动或卖货链头。"""
+        req = (self.trip or {}).get("switch_request") or {}
+        key = req.get("key")
+        resume = req.get("resume_state")
+        if not self.trip or not key or not resume:
+            raise ValueError("切换配置完成后没有可恢复的完整一趟状态")
+        completed = self.trip.setdefault("switch_completed", [])
+        if key not in completed:
+            completed.append(key)
+        self.trip["switch_request"] = None
+        self._log("trip", f"配置切换完成，继续状态 {resume}")
+        return self._do_goto({"state": resume})
+
     def _do_trip_next(self, action, ctl, screen_path):
         """三条链跑到底那一步的「分流」：单模块照旧停止，跑整趟则决定下一段去哪。
 
@@ -2227,7 +2383,7 @@ class StateMachineEngine:
             if err:
                 return self._trip_stop(f"整趟走不下去：{err}")
             self._apply_binding(pos, b)
-            return self._do_goto({"state": b["current_state"]})
+            return self._do_goto({"state": self.current_state})
 
         if after != "arrive":
             raise ValueError(f'trip_next 的 after 只认 "work" / "arrive"，现在是: {after!r}')

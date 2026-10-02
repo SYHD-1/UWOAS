@@ -1,9 +1,10 @@
 """图像识别核心模块（OpenCV 模板匹配）。
 
-提供四个函数：
-- find_template    ：单张模板匹配
-- find_any_template：多张模板（最多 5 张），任一匹配成功即返回
-- find_in_list     ：在列表区域查找，找不到则双向滑动（先向下看再向上看）并重试
+提供列表查找与基础识别函数：
+- find_template     ：单张模板匹配
+- find_any_template ：多张模板（最多 5 张），任一匹配成功即返回
+- find_in_list      ：在列表区域按模板查找，找不到则双向滑动
+- find_ocr_in_list  ：在列表区域按文字查找，可要求配置名完全相等
 - scroll_list_to_top：把列表滑回顶部，让每轮查找都从同一画面开始
 
 所有查找函数返回 dict 或 None：
@@ -184,6 +185,43 @@ def find_in_list(screen_path, template_path, list_roi, swipe_range=None,
     return None
 
 
+def find_ocr_in_list(screen_path, keyword, list_roi, swipe_range=None,
+                     max_swipes=5, capture=None, swipe_func=None,
+                     max_swipes_up=0, swipe_pause_ms=800,
+                     preprocess=True, scale=2, binary_method=None, exact=False):
+    """在可滚动列表内按文字查找，先向下看，再反向向上看。"""
+    if capture is None:
+        return ocr_find(screen_path, keyword, roi=list_roi, preprocess=preprocess,
+                        scale=scale, binary_method=binary_method, exact=exact)
+    if (max_swipes or max_swipes_up) and swipe_func is None:
+        raise ValueError("传了 max_swipes / max_swipes_up 就必须同时传 swipe_func")
+
+    down = swipe_range or _default_swipe(list_roi)
+    up = _reverse_swipe(down)
+    pause = max(int(swipe_pause_ms), 0) / 1000
+
+    def find(path):
+        return ocr_find(path, keyword, roi=list_roi, preprocess=preprocess,
+                        scale=scale, binary_method=binary_method, exact=exact)
+
+    result = find(screen_path)
+    if result["found"]:
+        result.update(swipes_used=0, swipe_direction="none")
+        return result
+
+    for direction, times in (("down", max_swipes), ("up", max_swipes_up)):
+        rng = down if direction == "down" else up
+        for i in range(1, int(times) + 1):
+            swipe_func(*rng)
+            time.sleep(pause)
+            screen_path = capture()
+            result = find(screen_path)
+            if result["found"]:
+                result.update(swipes_used=i, swipe_direction=direction)
+                return result
+    return None
+
+
 def scroll_list_to_top(max_times, swipe_func, swipe_range=None, list_roi=None,
                        capture=None, swipe_pause_ms=800):
     """把列表滑回顶部：朝「向上看」的方向固定滑 max_times 次。
@@ -295,8 +333,9 @@ def ocr_text(image_path, roi=None, preprocess=True, scale=2, binary_method=None)
     return "".join(texts)
 
 
-def ocr_find(image_path, keyword, roi=None, preprocess=True, scale=2, binary_method=None):
-    """在 ROI 内 OCR，判断结果是否包含关键词（包含即可，不要求完全相等）。
+def ocr_find(image_path, keyword, roi=None, preprocess=True, scale=2,
+             binary_method=None, exact=False):
+    """在 ROI 内 OCR 查找文字；exact=True 时要求一个 OCR 文本框与目标完全相等。
 
     返回 {"found": bool, "text": 完整文字, "cx": 关键词中心x, "cy": 关键词中心y}，
     未找到时 cx/cy 为 None。cx/cy 为原始图片像素坐标（已换算回 ROI 偏移和缩放）。
@@ -314,8 +353,11 @@ def ocr_find(image_path, keyword, roi=None, preprocess=True, scale=2, binary_met
     # detail=1 返回 (box, text, conf)，需要 box 才能定位关键词中心
     results = _get_reader().readtext(img, detail=1)
     full_text = "".join(text for _, text, _ in results)
+    target = str(keyword).strip()
     for box, text, _ in results:
-        if keyword in text:
+        candidate = str(text).strip()
+        matched = candidate == target if exact else target in candidate
+        if matched:
             cx, cy = _poly_center(box)
             return {"found": True, "text": full_text,
                     "cx": round(ox + cx / factor), "cy": round(oy + cy / factor)}
