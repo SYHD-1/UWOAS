@@ -295,6 +295,17 @@
           <button class="btn" onclick="newPlanRow()">+ 新增一个港口</button>
           <span id="plan-save-status" class="info"></span>
         </div>
+        <!-- 顶部速查（2026-10-02）：一个框同时搜「港口名」和「商品名」，只列命中、不给结论。
+             纯前端只读检索：不写文件、不碰下面的三级结构；点一条直接跳进那个港的二级清单。 -->
+        <div class="plan-lookup">
+          <div class="plan-lookup-bar">
+            <input type="text" id="plan-lookup-input" class="plan-lookup-input"
+                   placeholder="速查：打港口名或商品名，看这份表格里有没有（例：热那亚 / 油画 / 版）"
+                   oninput="setLookupQuery(this.value)">
+            <button class="btn small" onclick="clearLookup()">清空</button>
+          </div>
+          <div id="plan-lookup-result" class="plan-lookup-result"></div>
+        </div>
         <p class="hint plan-short">
           这一栏是<b>纯目录</b>：只回答「哪个港口买得到哪些货」，<b>不管这一趟怎么走、买哪几件</b>（那在「跑商设置」栏）。<br>
           一级<b>只有港口名</b>（可搜索、按拼音排）：<b>点一个港口进它的货物清单</b>，再点一件货才进详细编辑；

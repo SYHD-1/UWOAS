@@ -2496,6 +2496,8 @@ async function loadPlan() {
   planEdit = null;              // 重新读取 = 回到一级清单，别停在任何旧下标上
   planPort = null;
   planPortQuery = "";
+  planLookupQuery = "";         // 速查框也退回空的：切走再进这一栏是干净的
+  if ($("plan-lookup-input")) $("plan-lookup-input").value = "";
   const ports = new Set(planData.rows.map(r => (r.port || "").trim()).filter(Boolean));
   const g = planData.goods_options.length;
   $("plan-save-status").textContent =
@@ -2551,6 +2553,7 @@ function groupByAnchor(anchor) {
 let planEdit = null;      // 三级正在编辑第几行；null = 不在这一层
 let planPort = null;      // 一级选中的港口名（组的 label）；null = 停在一级港口清单
 let planPortQuery = "";   // 一级搜索框里的字，只筛显示、不改数据
+let planLookupQuery = ""; // 顶部速查框里的字：一个框同时搜「港口名」和「商品名」，只读、不改数据
 
 function planDetailEl() {
   return document.querySelector("#plan-list .plan-detail");
@@ -2558,6 +2561,7 @@ function planDetailEl() {
 
 function renderPlan() {
   const box = $("plan-list");
+  renderPlanLookup();           // 表格数据一变（增删改行 / 重新读取），顶部速查的命中结果跟着刷新
   if (!planData) { box.innerHTML = ""; return; }
   const g = planPort === null ? null : planGroupByLabel(planPort);
   if (!g) { planPort = null; planEdit = null; renderPortList(); return; }  // 那个港口没了（改名 / 删光）就退回一级
@@ -2601,6 +2605,70 @@ function setPortQuery(v) {
   renderPortList();
   const inp = $("plan-port-search");   // 整个列表重画了，把光标还给搜索框、停在末尾，能接着打
   if (inp) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
+}
+
+/* ---------- 顶部速查：一个框同时搜「港口名」和「商品名」（2026-10-02） ----------
+   只读检索：不动 planData、不 markPlanDirty()、不写文件 —— 它是「查」，不是「改」。
+   查的是内存里这份 rows（含还没保存的改动），和下面三级看到的是同一份，不会两处说法。
+   只列命中，不给「能不能跑」的结论：跑不跑得通取决于「跑商设置」那一栏，这里只管目录。 */
+function setLookupQuery(v) {
+  planLookupQuery = v;
+  renderPlanLookup();          // 只重画结果区：输入框不重建，光标不动，可以接着打
+}
+
+function clearLookup() {
+  planLookupQuery = "";
+  const inp = $("plan-lookup-input");
+  if (inp) { inp.value = ""; inp.focus(); }
+  renderPlanLookup();
+}
+
+function renderPlanLookup() {
+  const box = $("plan-lookup-result");
+  if (!box) return;
+  const q = planLookupQuery.trim().toLowerCase();
+  if (!planData || !q) { box.innerHTML = ""; return; }   // 没打字就不占地方
+
+  // ① 港口命中：港口名带这个字 → 列这个港 + 它有多少种货
+  const hitPorts = planGroups().filter(g => g.port && g.label.toLowerCase().includes(q));
+
+  // ② 商品命中：货名带这个字 → 这件货分布在哪些港（同名货跨港合并成一条，
+  //    这样「我这件货在哪个港有」一眼看得出；顺序按表格里的先后）
+  const byGoods = new Map();
+  planData.rows.forEach(row => {
+    const name = (row.goods_name || "").trim();
+    if (!name || !name.toLowerCase().includes(q)) return;
+    const port = (row.port || "").trim() || "（未填港口）";
+    if (!byGoods.has(name)) byGoods.set(name, []);
+    const ports = byGoods.get(name);
+    if (!ports.includes(port)) ports.push(port);
+  });
+
+  const word = escapeHtml(planLookupQuery.trim());
+  if (!hitPorts.length && !byGoods.size) {
+    box.innerHTML = `<div class="muted">这份表格里没有名字带「${word}」的港口或商品` +
+      `（这一栏是纯目录：查不到就是没填过，去下面加行）</div>`;
+    return;
+  }
+
+  // 点一条 → 跳进那个港的二级货物清单。速查区在 #plan-list 外面，
+  // 下面怎么重画都冲不掉它，所以能放心跳走、随时再查下一个。
+  const row = (label, note) => `
+    <div class="plan-lookup-row" data-port="${escapeHtml(label)}" onclick="openPlanPort(this.dataset.port)"
+         title="点开这个港的货物清单">
+      <span class="plan-lookup-key">${escapeHtml(label)}</span>
+      <span class="plan-lookup-cnt">${escapeHtml(note)}</span>
+      <span class="plan-lookup-go">打开 ›</span>
+    </div>`;
+  const portHtml = hitPorts.map(g => row(g.label, `${g.indices.length} 种货`)).join("");
+  const goodsHtml = [...byGoods.entries()].map(([name, ports]) =>
+    row(ports[0], `${ports.join("、")} · ${ports.length} 个港`)).join("");
+
+  box.innerHTML =
+    `<div class="plan-lookup-group">港口（命中 ${hitPorts.length} 个）</div>` +
+    (portHtml || `<div class="muted">没有名字带「${word}」的港口</div>`) +
+    `<div class="plan-lookup-group">商品（命中 ${byGoods.size} 种）</div>` +
+    (goodsHtml || `<div class="muted">没有名字带「${word}」的商品</div>`);
 }
 
 function openPlanPort(label) {

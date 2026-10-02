@@ -335,6 +335,30 @@ body {
 .plan-port-row:hover .plan-port-go { color: #89b4fa; }
 /* 还没填港口名的那组：港口名标红，点进去补名字 */
 .plan-port-row.warn .plan-port-name { color: #f38ba8; }
+/* 顶部速查（2026-10-02）：一个框搜「港口名 + 商品名」，只读、只列命中，结果分两组 */
+.plan-lookup {
+  margin: 10px 0 2px; padding: 10px;
+  border: 1px solid #313244; border-radius: 8px; background: #1e1f2c;
+}
+.plan-lookup-bar { display: flex; align-items: center; gap: 10px; }
+.plan-lookup-input {
+  flex: 1 1 auto; background: #11111b; color: #cdd6f4; border: 1px solid #45475a;
+  border-radius: 6px; padding: 6px 10px; font-size: 13px;
+}
+.plan-lookup-input:focus { border-color: #89b4fa; outline: none; }
+.plan-lookup-result { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.plan-lookup-result:empty { margin-top: 0; }   /* 没打字就不占地方 */
+.plan-lookup-group { font-size: 12px; color: #a6adc8; margin-top: 6px; }
+.plan-lookup-group:first-child { margin-top: 0; }
+.plan-lookup-row {
+  display: flex; align-items: center; gap: 10px; padding: 6px 10px;
+  border: 1px solid #313244; border-radius: 6px; background: #181825; cursor: pointer;
+}
+.plan-lookup-row:hover { border-color: #89b4fa; background: #26273a; }
+.plan-lookup-key { color: #89b4fa; font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.plan-lookup-cnt { color: #a6adc8; font-size: 12px; overflow-wrap: anywhere; }
+.plan-lookup-go { color: #45475a; font-size: 12px; margin-left: auto; white-space: nowrap; }
+.plan-lookup-row:hover .plan-lookup-go { color: #89b4fa; }
 /* 一级顶部那两行短说明 + 可折叠的全部规则（长说明摊在界面上会把清单挤得看不见） */
 #page-plan .hint.plan-short { margin: 8px 0 4px; }
 .plan-help { margin: 2px 0 8px; }
